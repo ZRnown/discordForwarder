@@ -167,9 +167,16 @@ export class SenderBot {
         let resp: any = null;
         if (hasUploads) {
           // Build multipart form with files and payload_json
-          const files = await this.downloadUploads(item.uploads!);
+          let files = await this.downloadUploads(item.uploads!);
+          // 若存在图片与视频，确保“用于 embed.image 的图片”位于 files[0]，使附件渲染顺序更自然（图片/Embed 在上，视频在下）
+          const imgIdx = files.findIndex((f) => f.isImage);
+          if (imgIdx > 0) {
+            const [img] = files.splice(imgIdx, 1);
+            files = [img, ...files];
+          }
           // Clamp description to 4096 to satisfy Discord limits
-          const desc = (chunk || "").slice(0, 4096);
+          let desc = (chunk || "").slice(0, 4096);
+          if (!desc || desc.trim() === "") desc = "\u200B"; // 零宽字符，保证 embed 存在
           const embed: any = {};
           if (desc && desc.trim() !== "") embed.description = desc;
           const firstImage = files.find((f) => f.isImage);
