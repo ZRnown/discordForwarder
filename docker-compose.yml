@@ -1,12 +1,11 @@
 name: forwarding-discord-telegram
 services:
   bot:
-    image: tapnisu/forwarding-discord-telegram
-    environment:
-      DISCORD_TOKEN: ${DISCORD_TOKEN}
-      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-      TELEGRAM_TOPIC_ID: ${TELEGRAM_TOPIC_ID}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
     volumes:
       - ./config.json:/app/config.json
     restart: unless-stopped

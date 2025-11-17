@@ -1,25 +1,16 @@
 {
-  "outputChannels": [],
-  "mutedGuildsIds": ["1013671171029467227", "1139818485166379039"],
+  "_comment": "Discord → Discord(Webhook) 配置示例。所有 ID 建议使用字符串。",
   "allowedGuildsIds": [],
-  "mutedChannelsIds": ["1013671171029467227"],
+  "mutedGuildsIds": [],
   "allowedChannelsIds": [],
+  "mutedChannelsIds": [],
   "allowedUsersIds": [],
-  "mutedUsersIds": ["1038694628490235904"],
-  "channelConfigs": {
-    "1013671171029467227": {
-      "muted": ["869088074758520832"],
-      "allowed": []
-    }
-  },
-  "disableLinkPreview": false,
-  "imagesAsMedia": true,
-  "showDate": false,
+  "mutedUsersIds": [],
+  "channelConfigs": {},
+  "showDate": true,
   "showChat": true,
-  "stackMessages": false,
-  "showMessageUpdates": false,
-  "showMessageDeletions": false,
-  "replacementsDictionary": {
-    ":joy:": "😂"
-  }
+  "stackMessages": true,
+  "showMessageUpdates": true,
+  "showMessageDeletions": true,
+  "replacementsDictionary": {}
 }

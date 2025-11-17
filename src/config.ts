@@ -11,7 +11,6 @@ export interface ChannelConfig {
 }
 
 export interface Config {
-  outputChannels?: ChatId[];
   mutedGuildsIds?: ChannelId[];
   allowedGuildsIds?: ChannelId[];
   mutedChannelsIds?: ChannelId[];
@@ -19,8 +18,6 @@ export interface Config {
   allowedUsersIds?: ChannelId[];
   mutedUsersIds?: ChannelId[];
   channelConfigs?: Record<string, ChannelConfig>;
-  disableLinkPreview: boolean;
-  imagesAsMedia?: boolean;
   showDate?: boolean;
   showChat?: boolean;
   stackMessages?: boolean;
@@ -32,7 +29,6 @@ export interface Config {
 export async function getConfig(): Promise<Config> {
   if (!existsSync("./config.json")) {
     const defaultConfig = JSON.stringify({
-      outputChannels: [],
       allowedGuildsIds: [],
       mutedGuildsIds: [],
       allowedChannelsIds: [],
@@ -40,8 +36,6 @@ export async function getConfig(): Promise<Config> {
       allowedUsersIds: [],
       mutedUsersIds: [],
       channelConfigs: {},
-      disableLinkPreview: false,
-      imagesAsMedia: true,
       showDate: false,
       showChat: true,
       stackMessages: false,
@@ -61,7 +55,6 @@ export async function getConfig(): Promise<Config> {
   const config: Config = JSON.parse(configString.toString());
 
   const idTypes = [
-    config.outputChannels,
     config.mutedGuildsIds,
     config.allowedGuildsIds,
     config.mutedChannelsIds,

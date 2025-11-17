@@ -27,12 +27,10 @@
     "url": "https://tapni.su"
   },
   "dependencies": {
-    "@grammyjs/auto-retry": "^2.0.2",
     "discord-webhook-node": "^1.1.8",
     "discord.js": "^14.23.2",
     "discord.js-selfbot-v13": "^3.7.1",
     "dotenv": "^16.6.1",
-    "grammy": "^1.38.3",
     "prettier": "^3.6.2",
     "proxy-agent": "^6.5.0"
   },
