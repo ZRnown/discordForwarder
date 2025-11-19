@@ -152,3 +152,4 @@ Selfbot that forwards your Discord messages to Telegram
    ```shell
    docker compose up -d
    ```
+# discordForwarderBot
