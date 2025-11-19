@@ -579,13 +579,24 @@ export class Bot {
         const freshnessTs = Math.max(editedTs || 0, createdTs || 0);
         const freshAge = freshnessTs > 0 ? (now - freshnessTs) : -1;
         const clickWindowMs = 30000; // 解锁点击后的“编辑新鲜度”允许窗口
+        const editedPrevThresholdMs = 60 * 1000; // 若消息创建早于该阈值且被编辑，视为“之前的信息被编辑”
         if (isClickFlow) {
+          // 用户要求：若检测到之前的信息被编辑，则不转发
+          if (editedTs && createdAge >= editedPrevThresholdMs) {
+            this.logger.debug(`specialChannel skip (edited-previous, click-flow): channel=${message.channelId} mid=${message.id} created=${createdTs} edited=${editedTs} createdAgeMs=${createdAge}`);
+            return;
+          }
           // 解锁流程内：按“编辑时间”判断新鲜，避免旧创建时间导致丢弃
           if (freshAge >= 0 && freshAge > clickWindowMs) {
             this.logger.debug(`specialChannel stale skip (edited-based): channel=${message.channelId} mid=${message.id} created=${createdTs} edited=${editedTs || "-"} tag=${tag || "-"} freshAgeMs=${freshAge}`);
             return;
           }
         } else {
+          // 普通路径同样遵循：若是很早创建且仅编辑触发，不转发
+          if (editedTs && createdAge >= editedPrevThresholdMs) {
+            this.logger.debug(`specialChannel skip (edited-previous): channel=${message.channelId} mid=${message.id} created=${createdTs} edited=${editedTs} createdAgeMs=${createdAge}`);
+            return;
+          }
           // 普通路径：允许按最大年龄过滤，但优先使用“编辑时间”若存在
           const basisAge = (freshnessTs > 0 ? freshAge : createdAge);
           if (basisAge >= 0 && basisAge > maxAgeMs) {
@@ -1545,22 +1556,37 @@ export class Bot {
       }
     }
 
-    // Extract SL: variants SL:, stop, and normalize timeframe close above/below；先尝试直接数值（含逗号）
+    // Extract SL: variants SL:, stop. Only capture numeric/BE/timeframe patterns and stop before parentheses/tails
     let sl = "";
-    const slMatchNum = allText.match(/\b(?:SL|stop)\s*:?\s*([0-9,]+(?:\.\d+)?)/i);
-    if (slMatchNum) {
-      sl = slMatchNum[1].replace(/,/g, "");
-    } else {
-      const slMatch = allText.match(/\bSL\s*:?\s*([A-Za-z0-9.,<>=\-+ %]+)\b/i) || allText.match(/\bstop\s*:?\s*([A-Za-z0-9.,<>=\-+ %]+)\b/i);
-      if (slMatch) sl = slMatch[1].trim().replace(/,/g, "");
+    // 优先从原始行定位 SL 所在行
+    const slLineRaw = (lines.find((l) => /\b(?:SL|stop)\b/i.test(l)) || "").replace(/\p{Cf}/gu, "");
+    const slLineNoMd = slLineRaw
+      .replace(/<:[A-Za-z0-9_]+:[0-9]+>/g, " ")
+      .replace(/[\*`_~]+/g, " ")
+      .trim();
+    if (slLineNoMd) {
+      // 1) BE / breakeven
+      if (/\b(BE|break\s*even|breakeven)\b/i.test(slLineNoMd)) {
+        sl = "BE";
+      }
+      // 2) timeframe close above/below N
+      if (!sl) {
+        const tf = slLineNoMd.match(/\b(?:[0-9]+\s*[hmHdD]|[hmHdD])\b.*?\b(?:close|open)s?\b.*?\b(?:above|below)\b[^0-9]*([0-9][0-9.,]*)/i);
+        if (tf) sl = tf[1].replace(/,/g, "");
+      }
+      // 3) 直接数值（在括号或文本前截断，仅取首个数字 token）
+      if (!sl) {
+        const num = slLineNoMd.match(/([0-9][0-9.,]*)/);
+        if (num) sl = num[1].replace(/,/g, "");
+      }
     }
     if (!sl) {
-      // Markdown 形式：如 **SL:** 0.6242 或 **SL:** 4h close below 0.6242
-      const slMdNum = allTextNoMd.match(/\b(?:SL|stop)\b[^0-9]{0,20}([0-9][0-9.,]*)/i);
-      if (slMdNum) sl = slMdNum[1].replace(/,/g, "");
+      // 回退：从去 Markdown 的全文里再尝试一次（避免抓到免责声明尾巴）
+      const slMdNum2 = allTextNoMd.match(/\b(?:SL|stop)\b[^\n]*?([0-9][0-9.,]*)/i);
+      if (slMdNum2) sl = slMdNum2[1].replace(/,/g, "");
       if (!sl) {
-        const slMdCond = allTextNoMd.match(/\b(?:SL|stop)\b[^A-Za-z0-9]{0,20}((?:\d+\s*[MHWD]|\d*\.?\d+\s*[MHWD]|\d+H|\d+M|\d+W|\d+D)\s*(?:close\s*)?(above|below)\s*([0-9]+(?:\.[0-9]+)?))/i);
-        if (slMdCond) sl = slMdCond[1].replace(/\s+close\s*/i, " ");
+        const slBe2 = allTextNoMd.match(/\b(?:SL|stop)\b[^A-Za-z0-9]{0,10}\b(BE|break\s*even|breakeven)\b/i);
+        if (slBe2) sl = "BE";
       }
     }
     // 规范化诸如 "4h close below 1.09" / "h4 close below 1.09" / "4H close above 2.5" / "daily close below 2.5" 等
