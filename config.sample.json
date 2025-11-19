@@ -1,16 +1,21 @@
 {
-  "_comment": "Discord → Discord(Webhook) 配置示例。所有 ID 建议使用字符串。",
-  "allowedGuildsIds": [],
-  "mutedGuildsIds": [],
-  "allowedChannelsIds": [],
-  "mutedChannelsIds": [],
-  "allowedUsersIds": [],
-  "mutedUsersIds": [],
-  "channelConfigs": {},
-  "showDate": true,
-  "showChat": true,
-  "stackMessages": true,
-  "showMessageUpdates": true,
-  "showMessageDeletions": true,
-  "replacementsDictionary": {}
+  "channelWebhooks": {
+    "其他普通源频道ID": "https://discord.com/api/webhooks/xxx/yyy"
+  },
+  "specialChannels": [
+    {
+      "sourceChannelId": "1026871730964271134",
+      "rule": "tradeSignal",
+      "title": "wwg-交易信号",
+      "skipTranslation": true,
+      "disableAttachments": true,
+      "useEmbed": true,
+      "webhookUrl": "https://discord.com/api/webhooks/AAA/BBB",
+      "traderToTarget": {
+        "Muzzugin": { "channelId": "1440264600779100200", "guildId": "1407314814979543071" },
+        "Woods":    { "channelId": "1440264625613439006", "guildId": "1407314814979543071" },
+        "NewTrader": { "channelId": "" }
+      }
+    }
+  ]
 }

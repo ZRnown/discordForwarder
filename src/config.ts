@@ -11,6 +11,8 @@ export interface ChannelConfig {
 }
 
 export interface Config {
+  // 映射：源频道ID -> 目标Webhook URL（一对一）
+  channelWebhooks?: Record<string, string>;
   mutedGuildsIds?: ChannelId[];
   allowedGuildsIds?: ChannelId[];
   mutedChannelsIds?: ChannelId[];
@@ -24,11 +26,32 @@ export interface Config {
   showMessageDeletions?: boolean;
   showMessageUpdates?: boolean;
   replacementsDictionary?: Record<string, string>;
+  specialChannels?: Array<{
+    sourceChannelId: string;
+    rule: "tradeSignal";
+    title?: string;
+    skipTranslation?: boolean;
+    disableAttachments?: boolean;
+    useEmbed?: boolean;
+    webhookUrl?: string;
+    traderToTarget?: Record<string, { channelId: string; guildId?: string; sourceUserId?: string; roleIds?: string[] }>;
+    fallbackTraderLink?: "mention" | "url" | "text";
+  }>;
+  historyScan?: {
+    enabled?: boolean;
+    limit?: number;
+    channels?: string[];
+  };
+  logging?: {
+    specialOnly?: boolean;
+    filterPattern?: string; // optional custom regex, overrides specialOnly default pattern
+  };
 }
 
 export async function getConfig(): Promise<Config> {
   if (!existsSync("./config.json")) {
     const defaultConfig = JSON.stringify({
+      channelWebhooks: {},
       allowedGuildsIds: [],
       mutedGuildsIds: [],
       allowedChannelsIds: [],
@@ -41,7 +64,8 @@ export async function getConfig(): Promise<Config> {
       stackMessages: false,
       showMessageUpdates: false,
       showMessageDeletions: false,
-      replacementsDictionary: {}
+      replacementsDictionary: {},
+      historyScan: { enabled: true }
     } satisfies Config);
 
     const formattedDefaultConfig = await prettier.format(defaultConfig, {

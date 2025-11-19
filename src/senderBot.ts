@@ -137,6 +137,7 @@ export class SenderBot {
     useEmbed?: boolean;
     extraEmbeds?: any[];
     uploads?: Array<{ url: string; filename: string; isImage?: boolean; isVideo?: boolean }>;
+    components?: any[];
   }>) {
     if (messagesToSend.length == 0) return;
 
@@ -167,16 +168,9 @@ export class SenderBot {
         let resp: any = null;
         if (hasUploads) {
           // Build multipart form with files and payload_json
-          let files = await this.downloadUploads(item.uploads!);
-          // 若存在图片与视频，确保“用于 embed.image 的图片”位于 files[0]，使附件渲染顺序更自然（图片/Embed 在上，视频在下）
-          const imgIdx = files.findIndex((f) => f.isImage);
-          if (imgIdx > 0) {
-            const [img] = files.splice(imgIdx, 1);
-            files = [img, ...files];
-          }
+          const files = await this.downloadUploads(item.uploads!);
           // Clamp description to 4096 to satisfy Discord limits
-          let desc = (chunk || "").slice(0, 4096);
-          if (!desc || desc.trim() === "") desc = "\u200B"; // 零宽字符，保证 embed 存在
+          const desc = (chunk || "").slice(0, 4096);
           const embed: any = {};
           if (desc && desc.trim() !== "") embed.description = desc;
           const firstImage = files.find((f) => f.isImage);
@@ -191,6 +185,9 @@ export class SenderBot {
             // add embeds only if we actually have description or image
             ...(Object.keys(embed).length > 0 ? { embeds: [embed] } : {})
           };
+          if (item.components && item.components.length > 0) {
+            payload.components = item.components;
+          }
           // Provide attachments descriptors to map files indices for attachment://filename resolution
           if (files.length > 0) {
             payload.attachments = files.map((f, idx) => ({ id: idx, filename: f.filename }));
@@ -213,6 +210,9 @@ export class SenderBot {
             payload.embeds = [...base, ...((item.extraEmbeds as any[]) || [])];
           } else {
             payload.content = chunk;
+          }
+          if (item.components && item.components.length > 0) {
+            payload.components = item.components;
           }
           if (item.username) payload.username = item.username;
           if (item.avatarUrl) payload.avatar_url = item.avatarUrl;

@@ -1,65 +1,66 @@
-import { Client as BotClient, GatewayIntentBits } from "discord.js";
 import { Client as SelfBotClient } from "discord.js-selfbot-v13";
 
 import { Bot, Client } from "./bot.js";
 import { getConfig } from "./config.js";
-import { BotBackend, getEnv } from "./env.js";
+import { getEnv } from "./env.js";
 import { SenderBot } from "./senderBot.js";
-import { ProxyAgent } from "proxy-agent";
 
 const env = getEnv();
 const config = await getConfig();
 
-const agent = env.PROXY_URL
-  ? new ProxyAgent({
-      getProxyForUrl: () => env.PROXY_URL
-    })
-  : undefined;
+// Build mapping from source channel IDs to webhook URLs
+const senderBotsBySource = new Map<string, SenderBot>();
+let defaultSenderBot: SenderBot | undefined;
+const prepares: Promise<any>[] = [];
 
-if (env.DISCORD_WEBHOOK_URL) {
-  const match = env.DISCORD_WEBHOOK_URL.match(/webhooks\/(\d+)\//);
-  if (match) config.mutedUsersIds?.push(match[1]);
+// 1) Base mapping from channelWebhooks
+if (config.channelWebhooks && Object.keys(config.channelWebhooks).length > 0) {
+  for (const [channelId, webhookUrl] of Object.entries(config.channelWebhooks)) {
+    const sb = new SenderBot({
+      chatsToSend: [],
+      replacementsDictionary: config.replacementsDictionary,
+      webhookUrl
+    });
+    prepares.push(sb.prepare());
+    senderBotsBySource.set(channelId, sb);
+    if (!defaultSenderBot) defaultSenderBot = sb;
+  }
 }
 
-const senderBot = new SenderBot({
-  chatsToSend: [],
-  replacementsDictionary: config.replacementsDictionary,
-  webhookUrl: env.DISCORD_WEBHOOK_URL,
-  httpAgent: agent
-});
-
-senderBot.prepare();
-
-const client: Client = (() => {
-  switch (env.DISCORD_BOT_BACKEND) {
-    case BotBackend.Bot:
-      return new BotClient({
-        intents: [
-          GatewayIntentBits.Guilds,
-          GatewayIntentBits.MessageContent,
-          GatewayIntentBits.GuildMembers,
-          GatewayIntentBits.DirectMessages,
-          GatewayIntentBits.GuildMessages
-        ]
-      });
-    case BotBackend.Selfbot:
-      return new SelfBotClient(
-        env.PROXY_URL !== undefined && agent !== undefined
-          ? {
-              ws: {
-                agent
-              },
-              http: {
-                agent: {
-                  uri: env.PROXY_URL
-                }
-              }
-            }
-          : undefined
-      );
+// 2) Override mapping for specialChannels with dedicated webhookUrl
+for (const sc of (config.specialChannels || [])) {
+  if (sc.webhookUrl && sc.sourceChannelId) {
+    const sb = new SenderBot({
+      chatsToSend: [],
+      replacementsDictionary: config.replacementsDictionary,
+      webhookUrl: sc.webhookUrl
+    });
+    prepares.push(sb.prepare());
+    senderBotsBySource.set(sc.sourceChannelId, sb);
+    if (!defaultSenderBot) defaultSenderBot = sb;
   }
-})();
+}
 
-const bot = new Bot(client, config, senderBot);
+if (!defaultSenderBot) {
+  throw new Error("At least one webhook must be configured via channelWebhooks or specialChannels[].webhookUrl.");
+}
+
+await Promise.all(prepares);
+
+// Output webhook info to help configure historyScan.channels
+{
+  const seen = new Set<SenderBot>();
+  for (const sb of senderBotsBySource.values()) {
+    if (seen.has(sb)) continue;
+    seen.add(sb);
+    try {
+      console.log(`[webhook] guild_id=${sb.webhookGuildId || "-"} channel_id=${sb.defaultChannelId || "-"}`);
+    } catch {}
+  }
+}
+
+const client: Client = new SelfBotClient();
+
+const bot = new Bot(client, config, defaultSenderBot!, senderBotsBySource);
 
 bot.client.login(env.DISCORD_TOKEN);
