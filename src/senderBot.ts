@@ -190,8 +190,21 @@ export class SenderBot {
         if (hasUploads) {
           // Build multipart form with files and payload_json
           const files = await this.downloadUploads(item.uploads!);
+          // Extract reply header to show as normal content above embed
+          let headerLine = "";
+          let desc = chunk || "";
+          if (desc.startsWith("↳ ")) {
+            const nl = desc.indexOf("\n");
+            if (nl > 0) {
+              headerLine = desc.slice(0, nl);
+              desc = desc.slice(nl + 1);
+            } else {
+              headerLine = desc;
+              desc = "";
+            }
+          }
           // Clamp description to 4096 to satisfy Discord limits
-          const desc = (chunk || "").slice(0, 4096);
+          desc = desc.slice(0, 4096);
           const embed: any = {};
           if (desc && desc.trim() !== "") embed.description = desc;
           const firstImage = files.find((f) => f.isImage);
@@ -199,7 +212,7 @@ export class SenderBot {
             embed.image = { url: `attachment://${firstImage.filename}` };
           }
           const payload: any = {
-            content: "",
+            content: headerLine,
             username: item.username,
             avatar_url: item.avatarUrl,
             allowed_mentions: { parse: [], replied_user: false },
