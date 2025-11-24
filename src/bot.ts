@@ -128,6 +128,7 @@ export class Bot {
     // 回复映射：若被回复消息存在映射，则在目标侧关联为引用
     let replyToTarget: { channelId: string; messageId: string } | undefined;
     let components: any[] | undefined;
+    const actionButtons: any[] = [];
     let replyJumpUrl: string | undefined;
     try {
       if (message.reference?.messageId) {
@@ -138,18 +139,27 @@ export class Bot {
           if (sender.webhookGuildId) {
             const url = `https://discord.com/channels/${sender.webhookGuildId}/${mapped.channelId}/${mapped.messageId}`;
             replyJumpUrl = url;
-            components = [
-              {
-                type: 1,
-                components: [
-                  { type: 2, style: 5, label: "查看被回复", url }
-                ]
-              }
-            ];
+            actionButtons.push({ type: 2, style: 5, label: "查看被回复", url });
           }
         }
       }
     } catch {}
+
+    // 始终提供“查看源消息”按钮（若能构造 URL）
+    try {
+      const gid = message.guildId || "@me";
+      const sourceUrl = `https://discord.com/channels/${gid}/${message.channelId}/${message.id}`;
+      actionButtons.push({ type: 2, style: 5, label: "查看源消息", url: sourceUrl });
+    } catch {}
+
+    if (actionButtons.length > 0) {
+      components = [
+        {
+          type: 1,
+          components: actionButtons
+        }
+      ];
+    }
 
     // 伪装作者为源作者（中文日志）
     let username = (message.author as any)?.globalName || message.author.username || message.author.tag;
@@ -189,6 +199,22 @@ export class Bot {
       useEmbed = false;
       finalText = cleanedSingle;
       uploads.length = 0; // 不携带附件
+    }
+
+    // 始终提供“查看源消息”按钮（若能构造 URL）
+    try {
+      const gid = message.guildId || "@me";
+      const sourceUrl = `https://discord.com/channels/${gid}/${message.channelId}/${message.id}`;
+      actionButtons.push({ type: 2, style: 5, label: "查看源消息", url: sourceUrl });
+    } catch {}
+
+    if (actionButtons.length > 0) {
+      components = [
+        {
+          type: 1,
+          components: actionButtons
+        }
+      ];
     }
 
     // 翻译逻辑：仅在满足启用条件时追加译文（且不是单链接场景）
