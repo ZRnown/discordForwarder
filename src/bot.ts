@@ -128,6 +128,7 @@ export class Bot {
     // 回复映射：若被回复消息存在映射，则在目标侧关联为引用
     let replyToTarget: { channelId: string; messageId: string } | undefined;
     let components: any[] | undefined;
+    let replyJumpUrl: string | undefined;
     try {
       if (message.reference?.messageId) {
         const mapped = this.sourceToTarget.get(message.reference.messageId);
@@ -136,6 +137,7 @@ export class Bot {
           // 如果 webhookGuildId 存在，添加一个按钮跳转到被回复消息的目标链接
           if (sender.webhookGuildId) {
             const url = `https://discord.com/channels/${sender.webhookGuildId}/${mapped.channelId}/${mapped.messageId}`;
+            replyJumpUrl = url;
             components = [
               {
                 type: 1,
@@ -230,6 +232,22 @@ export class Bot {
       uploads,
       ...(components ? { components } : {})
     }];
+
+    if (replyJumpUrl) {
+      finalText = `回复 ➜ ${replyJumpUrl}\n` + finalText;
+    } else if (message.reference?.messageId) {
+      // 若无跳转URL（例如拿不到 webhookGuildId 或未建立映射），尝试加入作者与内容摘要
+      try {
+        const ref = await message.fetchReference();
+        const authorName = (ref.author as any)?.globalName || ref.author?.username || ref.author?.tag || "引用";
+        const plain = (ref.content || "").replace(/[\r\n]+/g, " ").trim();
+        const snippet = plain.length > 80 ? plain.slice(0, 77) + "…" : plain;
+        const prefix = snippet ? `回复 ${authorName}: ${snippet}` : `回复 ${authorName}`;
+        finalText = `${prefix}\n` + finalText;
+      } catch {}
+    }
+
+    toSend[0].content = finalText;
 
     try {
       const results = await sender.sendData(toSend);
@@ -340,13 +358,18 @@ export class Bot {
       const key = String(this.env.DEEPSEEK_API_KEY || "");
       if (!url || !key) return null;
 
-      // Protect emoji aliases and custom emojis from being altered by translation
+      // Protect emoji aliases, custom emojis, and native emojis from being altered by translation
       const placeholders: string[] = [];
       let safe = raw.replace(/<a?:[A-Za-z0-9_~+.-]+:\\d+>/g, (m) => {
         const idx = placeholders.push(m) - 1;
         return `__EMJ_${idx}__`;
       });
       safe = safe.replace(/:[A-Za-z0-9_~+.-]+:/g, (m) => {
+        const idx = placeholders.push(m) - 1;
+        return `__EMJ_${idx}__`;
+      });
+      // Mask native pictographic emojis
+      safe = safe.replace(/[\p{Extended_Pictographic}\u200D\uFE0F\u2640\u2642\u{1F3FB}-\u{1F3FF}]+/gu, (m) => {
         const idx = placeholders.push(m) - 1;
         return `__EMJ_${idx}__`;
       });
