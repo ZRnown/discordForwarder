@@ -202,9 +202,10 @@ export class Bot {
         const cleaned = raw.replace(/\p{Cf}/gu, "");
         const aliasFilter = cleaned.replace(/[^:\sA-Za-z0-9_~+.-]/gu, "");
         const isOnlyAliasEmotes = /^(?:\s*:[A-Za-z0-9_~+.-]+:\s*)+$/u.test(aliasFilter);
+        const isOnlyCustomEmotes = /^(?:\s*<a?:[A-Za-z0-9_~+.-]+:\d+>\s*)+$/u.test(raw);
         const compact = raw.replace(/[\s\n\r\t]+/g, "");
         const emojiOnly = compact.length > 0 && compact.replace(/[\p{Extended_Pictographic}\u200D\uFE0F\u2640\u2642\u{1F3FB}-\u{1F3FF}]+/gu, "") === "";
-        const shouldTranslate = hasLatin && !hasCJK && !isAllUrls && !isOnlyAliasEmotes && !emojiOnly;
+        const shouldTranslate = hasLatin && !hasCJK && !isAllUrls && !isOnlyAliasEmotes && !isOnlyCustomEmotes && !emojiOnly;
         if (shouldTranslate) {
           const translated = await this.translateText(raw);
           if (translated) {
@@ -339,6 +340,17 @@ export class Bot {
       const key = String(this.env.DEEPSEEK_API_KEY || "");
       if (!url || !key) return null;
 
+      // Protect emoji aliases and custom emojis from being altered by translation
+      const placeholders: string[] = [];
+      let safe = raw.replace(/<a?:[A-Za-z0-9_~+.-]+:\\d+>/g, (m) => {
+        const idx = placeholders.push(m) - 1;
+        return `__EMJ_${idx}__`;
+      });
+      safe = safe.replace(/:[A-Za-z0-9_~+.-]+:/g, (m) => {
+        const idx = placeholders.push(m) - 1;
+        return `__EMJ_${idx}__`;
+      });
+
       const payload = JSON.stringify({
         model: "deepseek-chat",
         messages: [
@@ -348,7 +360,7 @@ export class Bot {
           },
           {
             role: "user",
-            content: raw
+            content: safe
           }
         ],
         temperature: 0
@@ -388,6 +400,11 @@ export class Bot {
 
       let content = result?.choices?.[0]?.message?.content;
       if (typeof content !== "string") return null;
+      // Restore placeholders
+      content = content.replace(/__EMJ_(\d+)__/g, (_, i) => {
+        const idx = Number(i);
+        return Number.isFinite(idx) && placeholders[idx] != null ? placeholders[idx] : _;
+      });
       return content.trim();
     } catch {
       return null;
