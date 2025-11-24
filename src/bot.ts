@@ -225,8 +225,9 @@ export class Bot {
       ];
     }
 
-    // 若源消息为“回复”，无论是否能建立真正引用，都在文本最前添加可见的回复头部，仅保留作者与可点击链接（不重复展示纯文本频道名）
+    // 若源消息为"回复"，无论是否能建立真正引用，都在文本最前添加可见的回复头部，仅保留作者与可点击链接（不重复展示纯文本频道名）
     console.log(`[DEBUG] Processing message ${message.id}, has reference:`, !!message.reference?.messageId);
+    let replyHeader = "";  // 保存回复头部,避免被翻译逻辑覆盖
     if (message.reference?.messageId) {
       console.log(`[DEBUG] Message ${message.id} is a reply to ${message.reference.messageId}`);
       let authorName: string | undefined;
@@ -244,9 +245,9 @@ export class Bot {
       }
       if (!authorName) authorName = "某条消息";
       const link = replyJumpUrl ? ` • ${replyJumpUrl}` : "";
-      const header = `↳ @${authorName}${link}`;
-      console.log(`[DEBUG] Adding reply header:`, header);
-      finalText = `${header}\n${finalText}`;
+      replyHeader = `↳ @${authorName}${link}`;
+      console.log(`[DEBUG] Adding reply header:`, replyHeader);
+      finalText = `${replyHeader}\n${finalText}`;
       console.log(`[DEBUG] Final text after header:`, finalText.substring(0, 100));
     }
 
@@ -257,7 +258,7 @@ export class Bot {
         const raw = originalText;
         const hasLatin = /[A-Za-z]/.test(raw);
         const hasCJK = /[\u3400-\u9FFF\uF900-\uFAFF]/.test(raw);
-        const urlRe = /^(<?https?:\/\/\S+>?)$/i;
+        const urlRe = /^(<?\bhttps?:\/\/\S+>?)$/i;
         const tokens = raw.split(/\s+/).filter(Boolean);
         const isAllUrls = tokens.length > 0 && tokens.every((t) => urlRe.test(t));
         const cleaned = raw.replace(/\p{Cf}/gu, "");
@@ -273,7 +274,12 @@ export class Bot {
             const a = raw.trim();
             const b = translated.trim();
             if (b && b.toLowerCase() !== a.toLowerCase()) {
-              finalText = `${a}\n-----------\n${b}`;
+              // 保留回复头部,只替换消息内容部分
+              if (replyHeader) {
+                finalText = `${replyHeader}\n${a}\n-----------\n${b}`;
+              } else {
+                finalText = `${a}\n-----------\n${b}`;
+              }
             }
           }
         }
