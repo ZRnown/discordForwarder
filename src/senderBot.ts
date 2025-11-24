@@ -202,6 +202,8 @@ export class SenderBot {
               headerLine = desc;
               desc = "";
             }
+            console.log(`[SENDER] Extracted reply header: "${headerLine}"`);
+            console.log(`[SENDER] Remaining desc: "${desc.substring(0, 50)}"`);
           }
           // Clamp description to 4096 to satisfy Discord limits
           desc = desc.slice(0, 4096);
@@ -233,6 +235,8 @@ export class SenderBot {
           if (item.replyToTarget?.messageId) {
             payload.message_reference = { message_id: item.replyToTarget.messageId, fail_if_not_exists: false };
           }
+          console.log(`[SENDER] Sending multipart with content: "${payload.content}"`);
+          console.log(`[SENDER] Has embeds: ${!!payload.embeds}, Has message_reference: ${!!payload.message_reference}`);
           resp = await this.postMultipart(payload, files, true);
         } else {
           const payload: any = {
@@ -251,12 +255,17 @@ export class SenderBot {
                 headerLine = body;
                 body = "";
               }
+              console.log(`[SENDER-EMBED] Extracted reply header: "${headerLine}"`);
+              console.log(`[SENDER-EMBED] Remaining body: "${body.substring(0, 50)}"`);
             }
             payload.content = headerLine;
             const base = body ? [{ description: body }] : [];
             payload.embeds = [...base, ...((item.extraEmbeds as any[]) || [])];
+            console.log(`[SENDER-EMBED] Final content: "${payload.content}"`);
+            console.log(`[SENDER-EMBED] Embeds count: ${payload.embeds.length}`);
           } else {
             payload.content = chunk;
+            console.log(`[SENDER-NO-EMBED] Content: "${chunk?.substring(0, 50)}"`);
           }
           if (item.components && item.components.length > 0) {
             payload.components = item.components;
@@ -265,6 +274,7 @@ export class SenderBot {
           if (item.avatarUrl) payload.avatar_url = item.avatarUrl;
           if (item.replyToTarget?.messageId) {
             payload.message_reference = { message_id: item.replyToTarget.messageId, fail_if_not_exists: false };
+            console.log(`[SENDER] Adding message_reference: ${item.replyToTarget.messageId}`);
           }
           resp = await this.postToWebhook(payload, true);
         }

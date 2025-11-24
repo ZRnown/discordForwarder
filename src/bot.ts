@@ -49,7 +49,7 @@ export class Bot {
       if (typeof (this.logger as any).setFilter === "function") {
         (this.logger as any).setFilter(pattern);
       }
-    } catch {}
+    } catch { }
 
     (this.client as any).on("ready", (clientArg: Client<true>) => {
       const msg = `已登录 Discord，账号 @${clientArg.user?.tag}`;
@@ -96,7 +96,7 @@ export class Bot {
       const buf = await fs.readFile(this.mapFile, "utf-8");
       const json = JSON.parse(buf) as Record<string, { channelId: string; messageId: string }>;
       this.sourceToTarget = new Map(Object.entries(json));
-    } catch {}
+    } catch { }
   }
 
   private async saveMapping() {
@@ -106,7 +106,7 @@ export class Bot {
       const tmp = this.mapFile + ".tmp";
       await fs.writeFile(tmp, JSON.stringify(obj), "utf-8");
       await fs.rename(tmp, this.mapFile);
-    } catch {}
+    } catch { }
   }
 
   private async processAndSend(message: Message, tag?: string) {
@@ -151,14 +151,14 @@ export class Bot {
           replyJumpUrl = replyJumpUrl || srcReplyUrl;
         }
       }
-    } catch {}
+    } catch { }
 
     // 始终提供“查看源消息”按钮（若能构造 URL）
     try {
       const gid = message.guildId || "@me";
       const sourceUrl = `https://discord.com/channels/${gid}/${message.channelId}/${message.id}`;
       actionButtons.push({ type: 2, style: 5, label: "查看源消息", url: sourceUrl });
-    } catch {}
+    } catch { }
 
     if (actionButtons.length > 0) {
       components = [
@@ -179,7 +179,7 @@ export class Bot {
       } else if (typeof anyAuthor.avatarURL === "function") {
         avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
       }
-    } catch {}
+    } catch { }
 
     // 收集当前消息的附件（图片/视频标记用于 embed 图像）
     const uploads: Array<{ url: string; filename: string; isImage?: boolean; isVideo?: boolean }> = [];
@@ -192,7 +192,7 @@ export class Bot {
         const isVideo = ct.startsWith("video/") || /(\.mp4|\.mov|\.webm|\.mkv|\.avi)$/i.test(url);
         uploads.push({ url, filename, isImage, isVideo });
       }
-    } catch {}
+    } catch { }
 
     // 特判：单条 Twitter/X 或 Tenor/Giphy 链接，改为纯文本发送触发原生预览
     const rawContent = (message.content || "").trim();
@@ -214,13 +214,13 @@ export class Bot {
       const gid = message.guildId || "@me";
       const sourceUrl = `https://discord.com/channels/${gid}/${message.channelId}/${message.id}`;
       actionButtons.push({ type: 2, style: 5, label: "查看源消息", url: sourceUrl });
-    } catch {}
+    } catch { }
 
     if (actionButtons.length > 0) {
       components = [
         {
           type: 1,
-  components: actionButtons
+          components: actionButtons
         }
       ];
     }
@@ -240,7 +240,7 @@ export class Bot {
           const ru: any = (message as any).mentions?.repliedUser;
           if (ru) authorName = ru.globalName || ru.username || ru.tag;
           console.log(`[DEBUG] Fallback to repliedUser:`, authorName);
-        } catch {}
+        } catch { }
       }
       if (!authorName) authorName = "某条消息";
       const link = replyJumpUrl ? ` • ${replyJumpUrl}` : "";
@@ -278,7 +278,7 @@ export class Bot {
           }
         }
       }
-    } catch {}
+    } catch { }
 
     const toSend = [{
       content: finalText,
@@ -293,6 +293,13 @@ export class Bot {
     }];
 
     toSend[0].content = finalText;
+
+    // 添加明确的日志显示要发送的内容
+    if (message.reference?.messageId) {
+      this.logger.info(`[REPLY] Sending reply message: sourceId=${message.id} replyTo=${message.reference.messageId}`);
+      this.logger.info(`[REPLY] Content preview: ${finalText.substring(0, 150)}`);
+      this.logger.info(`[REPLY] Has replyToTarget: ${!!replyToTarget}, useEmbed: ${useEmbed}`);
+    }
 
     try {
       const results = await sender.sendData(toSend);
@@ -359,7 +366,7 @@ export class Bot {
         log += `\n  Attachment: name=${attachment.name} size=${formatSize(attachment.size)} url=${attachment.url}`;
       }
       await this.logger.debug(log);
-    } catch {}
+    } catch { }
 
     return { content: render } as RenderOutput;
   }
