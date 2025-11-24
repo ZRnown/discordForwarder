@@ -7,12 +7,14 @@ const LOG_KEEP_DAYS = parseInt(
   process.env.LOG_KEEP_DAYS || process.env.PM2_LOG_KEEP_DAYS || "7",
   10
 );
+const LOG_MAX_SIZE = String(process.env.PM2_LOG_MAX_SIZE || process.env.LOG_MAX_SIZE || "20M");
 
 module.exports = {
   apps: [
     {
       name: "discord-forwarder-bot",
-      script: "dist/index.js",
+      script: "./run.sh",
+      interpreter: "bash",
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
@@ -45,8 +47,8 @@ module.exports = {
       workerInterval: "30", // check every 30 sec
       rotateInterval: "0 0 * * *", // rotate daily at 00:00
       rotateModule: true, // rotate PM2 internal logs as well
-      // Optional: limit single file size if you prefer size-based rotate too
-      // max_size: "20M",
+      // Size-based rotate in addition to daily schedule
+      max_size: LOG_MAX_SIZE,
     },
   },
 };
