@@ -225,19 +225,13 @@ export class Bot {
       ];
     }
 
-    // 若源消息为“回复”，无论是否能建立真正引用，都在文本最前添加可见的回复头部，指明被回复的作者（和频道），并在可用时附上跳转链接
+    // 若源消息为“回复”，无论是否能建立真正引用，都在文本最前添加可见的回复头部，仅保留作者与可点击链接（不重复展示纯文本频道名）
     try {
       if (message.reference?.messageId) {
         const ref = await message.fetchReference();
         const authorName = (ref.author as any)?.globalName || ref.author?.username || ref.author?.tag || "某用户";
-        let channelName = "";
-        try {
-          // 获取频道名（可能需要 fetch）
-          const ch: any = await (ref.channel as any)?.fetch?.();
-          channelName = ch?.name ? ` #${ch.name}` : "";
-        } catch {}
         const link = replyJumpUrl ? ` • ${replyJumpUrl}` : "";
-        const header = `↳ @${authorName}${channelName}${link}`;
+        const header = `↳ @${authorName}${link}`;
         finalText = `${header}\n${finalText}`;
       }
     } catch {}
