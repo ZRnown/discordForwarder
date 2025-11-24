@@ -141,6 +141,14 @@ export class Bot {
             replyJumpUrl = url;
             actionButtons.push({ type: 2, style: 5, label: "查看被回复", url });
           }
+        } else {
+          // 映射不存在，提供回退：指向源被回复消息
+          const refChan = message.reference.channelId || message.channelId;
+          const gid = message.guildId || "@me";
+          const srcReplyUrl = `https://discord.com/channels/${gid}/${refChan}/${message.reference.messageId}`;
+          actionButtons.push({ type: 2, style: 5, label: "查看被回复(源)", url: srcReplyUrl });
+          // 作为头部链接回退
+          replyJumpUrl = replyJumpUrl || srcReplyUrl;
         }
       }
     } catch {}
@@ -217,7 +225,7 @@ export class Bot {
       ];
     }
 
-    // 若源消息为“回复”，无论是否能建立真正引用，都在文本最前添加可见的回复头部，指明被回复的作者（和频道）
+    // 若源消息为“回复”，无论是否能建立真正引用，都在文本最前添加可见的回复头部，指明被回复的作者（和频道），并在可用时附上跳转链接
     try {
       if (message.reference?.messageId) {
         const ref = await message.fetchReference();
@@ -228,7 +236,8 @@ export class Bot {
           const ch: any = await (ref.channel as any)?.fetch?.();
           channelName = ch?.name ? ` #${ch.name}` : "";
         } catch {}
-        const header = `↳ @${authorName}${channelName}`;
+        const link = replyJumpUrl ? ` • ${replyJumpUrl}` : "";
+        const header = `↳ @${authorName}${channelName}${link}`;
         finalText = `${header}\n${finalText}`;
       }
     } catch {}
