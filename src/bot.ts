@@ -226,15 +226,22 @@ export class Bot {
     }
 
     // 若源消息为“回复”，无论是否能建立真正引用，都在文本最前添加可见的回复头部，仅保留作者与可点击链接（不重复展示纯文本频道名）
-    try {
-      if (message.reference?.messageId) {
+    if (message.reference?.messageId) {
+      let authorName: string | undefined;
+      try {
         const ref = await message.fetchReference();
-        const authorName = (ref.author as any)?.globalName || ref.author?.username || ref.author?.tag || "某用户";
-        const link = replyJumpUrl ? ` • ${replyJumpUrl}` : "";
-        const header = `↳ @${authorName}${link}`;
-        finalText = `${header}\n${finalText}`;
+        authorName = (ref.author as any)?.globalName || ref.author?.username || ref.author?.tag || undefined;
+      } catch {
+        try {
+          const ru: any = (message as any).mentions?.repliedUser;
+          if (ru) authorName = ru.globalName || ru.username || ru.tag;
+        } catch {}
       }
-    } catch {}
+      if (!authorName) authorName = "某条消息";
+      const link = replyJumpUrl ? ` • ${replyJumpUrl}` : "";
+      const header = `↳ @${authorName}${link}`;
+      finalText = `${header}\n${finalText}`;
+    }
 
     // 翻译逻辑：仅在满足启用条件时追加译文（且不是单链接场景）
     try {
