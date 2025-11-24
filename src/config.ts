@@ -26,25 +26,30 @@ export interface Config {
   showMessageDeletions?: boolean;
   showMessageUpdates?: boolean;
   replacementsDictionary?: Record<string, string>;
-  specialChannels?: Array<{
-    sourceChannelId: string;
-    rule: "tradeSignal";
-    title?: string;
-    skipTranslation?: boolean;
-    disableAttachments?: boolean;
-    useEmbed?: boolean;
-    webhookUrl?: string;
-    traderToTarget?: Record<string, { channelId: string; guildId?: string; sourceUserId?: string; roleIds?: string[] }>;
-    fallbackTraderLink?: "mention" | "url" | "text";
-  }>;
   historyScan?: {
     enabled?: boolean;
     limit?: number;
     channels?: string[];
   };
   logging?: {
-    specialOnly?: boolean;
     filterPattern?: string; // optional custom regex, overrides specialOnly default pattern
+    keepDays?: number; // 保留最近 N 天日志
+  };
+  antiAbuse?: {
+    // 全局随机抖动毫秒（对频繁请求增加随机延迟，降低判定风险）
+    requestJitterMs?: { min?: number; max?: number };
+    // 自动点击 Unlock 限流
+    unlock?: {
+      enabled?: boolean;             // 允许自动点击（默认 true）
+      maxClicksPerMinute?: number;   // 每分钟最大点击次数（默认 6）
+      jitterMs?: { min?: number; max?: number }; // 点击前随机延迟（默认 150~450ms）
+      postClickScanLimit?: number;   // 点击后扫描的最近消息条数上限（默认 20）
+    };
+    // 降低历史扫描风险
+    historyScan?: {
+      enabled?: boolean;             // 默认为继承顶层 historyScan.enabled，可单独关闭
+      missingAccessCooldownMs?: number; // 某目标频道 Missing Access 后的冷却时间（默认 3600000 = 1h）
+    };
   };
 }
 

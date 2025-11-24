@@ -78,9 +78,12 @@ export class SenderBot {
               resolve(null);
             }
           } else {
-            reject(new Error(`Webhook multipart failed ${res.statusCode}: ${res.statusMessage} ${body || ""}`));
+            reject(new Error(`Webhook 多部分上传失败，状态码 ${res.statusCode}: ${res.statusMessage} ${body || ""}`));
           }
         });
+      });
+      req.setTimeout(15000, () => {
+        req.destroy(new Error("Webhook 多部分请求超时"));
       });
       req.on("error", (err) => reject(err));
       req.write(payload);
@@ -98,6 +101,8 @@ export class SenderBot {
   }
 
   private async downloadUrl(fileUrl: string): Promise<Buffer> {
+    const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024; // 10MB
+    const DOWNLOAD_TIMEOUT_MS = 20000; // 20s
     const u = new URL(fileUrl);
     const options: https.RequestOptions = {
       method: "GET",
@@ -107,9 +112,25 @@ export class SenderBot {
     };
     return await new Promise<Buffer>((resolve, reject) => {
       const req = https.request(options, (res) => {
+        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume(); // discard
+          return reject(new Error(`下载失败，状态码 ${res.statusCode}`));
+        }
         const chunks: Buffer[] = [];
-        res.on("data", (d) => chunks.push(d as Buffer));
+        let total = 0;
+        res.on("data", (d) => {
+          const b = d as Buffer;
+          total += b.length;
+          if (total > MAX_DOWNLOAD_BYTES) {
+            req.destroy(new Error("下载超过大小限制"));
+            return;
+          }
+          chunks.push(b);
+        });
         res.on("end", () => resolve(Buffer.concat(chunks)));
+      });
+      req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+        req.destroy(new Error("下载超时"));
       });
       req.on("error", (e) => reject(e));
       req.end();
@@ -283,9 +304,12 @@ export class SenderBot {
                 // ignore parse errors
               }
             }
-            reject(new Error(`Webhook request failed with status ${res.statusCode}: ${res.statusMessage} ${body || ""}`));
+            reject(new Error(`Webhook 请求失败，状态码 ${res.statusCode}: ${res.statusMessage} ${body || ""}`));
           }
         });
+      });
+      req.setTimeout(15000, () => {
+        req.destroy(new Error("Webhook 请求超时"));
       });
       req.on("error", (err) => reject(err));
       req.write(payload);

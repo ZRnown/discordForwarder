@@ -27,22 +27,8 @@ if (config.channelWebhooks && Object.keys(config.channelWebhooks).length > 0) {
   }
 }
 
-// 2) Override mapping for specialChannels with dedicated webhookUrl
-for (const sc of (config.specialChannels || [])) {
-  if (sc.webhookUrl && sc.sourceChannelId) {
-    const sb = new SenderBot({
-      chatsToSend: [],
-      replacementsDictionary: config.replacementsDictionary,
-      webhookUrl: sc.webhookUrl
-    });
-    prepares.push(sb.prepare());
-    senderBotsBySource.set(sc.sourceChannelId, sb);
-    if (!defaultSenderBot) defaultSenderBot = sb;
-  }
-}
-
 if (!defaultSenderBot) {
-  throw new Error("At least one webhook must be configured via channelWebhooks or specialChannels[].webhookUrl.");
+  throw new Error("At least one webhook must be configured via channelWebhooks.");
 }
 
 await Promise.all(prepares);
