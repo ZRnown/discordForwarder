@@ -217,6 +217,22 @@ export class Bot {
       ];
     }
 
+    // 若源消息为“回复”，无论是否能建立真正引用，都在文本最前添加可见的回复头部，指明被回复的作者（和频道）
+    try {
+      if (message.reference?.messageId) {
+        const ref = await message.fetchReference();
+        const authorName = (ref.author as any)?.globalName || ref.author?.username || ref.author?.tag || "某用户";
+        let channelName = "";
+        try {
+          // 获取频道名（可能需要 fetch）
+          const ch: any = await (ref.channel as any)?.fetch?.();
+          channelName = ch?.name ? ` #${ch.name}` : "";
+        } catch {}
+        const header = `↳ @${authorName}${channelName}`;
+        finalText = `${header}\n${finalText}`;
+      }
+    } catch {}
+
     // 翻译逻辑：仅在满足启用条件时追加译文（且不是单链接场景）
     try {
       const env = this.env;
