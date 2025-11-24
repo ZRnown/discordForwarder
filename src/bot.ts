@@ -284,20 +284,6 @@ export class Bot {
       ...(components ? { components } : {})
     }];
 
-    if (replyJumpUrl) {
-      finalText = `回复 ➜ ${replyJumpUrl}\n` + finalText;
-    } else if (message.reference?.messageId) {
-      // 若无跳转URL（例如拿不到 webhookGuildId 或未建立映射），尝试加入作者与内容摘要
-      try {
-        const ref = await message.fetchReference();
-        const authorName = (ref.author as any)?.globalName || ref.author?.username || ref.author?.tag || "引用";
-        const plain = (ref.content || "").replace(/[\r\n]+/g, " ").trim();
-        const snippet = plain.length > 80 ? plain.slice(0, 77) + "…" : plain;
-        const prefix = snippet ? `回复 ${authorName}: ${snippet}` : `回复 ${authorName}`;
-        finalText = `${prefix}\n` + finalText;
-      } catch {}
-    }
-
     toSend[0].content = finalText;
 
     try {

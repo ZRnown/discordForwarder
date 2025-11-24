@@ -25,7 +25,21 @@ export class FileLogger {
   }
 
   private formatLine(level: string, msg: string) {
-    const ts = new Date().toISOString();
+    const d = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, "0");
+    const pad3 = (n: number) => String(n).padStart(3, "0");
+    const yyyy = d.getFullYear();
+    const mm = pad2(d.getMonth() + 1);
+    const dd = pad2(d.getDate());
+    const HH = pad2(d.getHours());
+    const MM = pad2(d.getMinutes());
+    const SS = pad2(d.getSeconds());
+    const sss = pad3(d.getMilliseconds());
+    const offMin = -d.getTimezoneOffset(); // minutes east of UTC
+    const sign = offMin >= 0 ? "+" : "-";
+    const offH = pad2(Math.floor(Math.abs(offMin) / 60));
+    const offM = pad2(Math.abs(offMin) % 60);
+    const ts = `${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}.${sss} ${sign}${offH}:${offM}`;
     return `[${ts}] [${level}] ${msg}\n`;
   }
 
