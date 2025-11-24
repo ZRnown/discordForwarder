@@ -239,8 +239,21 @@ export class SenderBot {
             allowed_mentions: { parse: [], replied_user: false }
           };
           if (item.useEmbed) {
-            payload.content = "";
-            const base = chunk ? [{ description: chunk }] : [];
+            // Extract header line to show as normal content
+            let headerLine = "";
+            let body = chunk || "";
+            if (body.startsWith("↳ ")) {
+              const nl = body.indexOf("\n");
+              if (nl > 0) {
+                headerLine = body.slice(0, nl);
+                body = body.slice(nl + 1);
+              } else {
+                headerLine = body;
+                body = "";
+              }
+            }
+            payload.content = headerLine;
+            const base = body ? [{ description: body }] : [];
             payload.embeds = [...base, ...((item.extraEmbeds as any[]) || [])];
           } else {
             payload.content = chunk;
