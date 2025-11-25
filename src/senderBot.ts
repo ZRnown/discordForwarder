@@ -101,7 +101,7 @@ export class SenderBot {
   }
 
   private async downloadUrl(fileUrl: string): Promise<Buffer> {
-    const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024; // 10MB
+    const MAX_DOWNLOAD_BYTES = 24 * 1024 * 1024; // ~24MB to fit under Discord 25MB webhook cap
     const DOWNLOAD_TIMEOUT_MS = 20000; // 20s
     const u = new URL(fileUrl);
     const options: https.RequestOptions = {
@@ -112,6 +112,12 @@ export class SenderBot {
     };
     return await new Promise<Buffer>((resolve, reject) => {
       const req = https.request(options, (res) => {
+        const lenHeader = res.headers["content-length"];
+        const declared = lenHeader ? Number(lenHeader) : undefined;
+        if (declared && declared > MAX_DOWNLOAD_BYTES) {
+          res.resume();
+          return reject(new Error("下载超过大小限制"));
+        }
         if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
           res.resume(); // discard
           return reject(new Error(`下载失败，状态码 ${res.statusCode}`));
