@@ -4,5 +4,45 @@
   },
   "logging": {
     "keepDays": 7
+  },
+  "activePersonas": {
+    "muzzagin": {
+      "userId": "1234567890",
+      "identityRoleId": "9876543210",
+      "jumpChannelId": "1407314815541575732",
+      "keyword": "muzzagin",
+      "channelButtonLabel": "🍑𝑴𝒖𝒛𝒛𝒂𝒈𝒊n"
+    },
+    "jdrip": {
+      "userId": "2345678901",
+      "identityRoleId": "1098765432",
+      "jumpChannelId": "1407314815541575732",
+      "keyword": "jdrip",
+      "channelButtonLabel": "🎱𝑱𝒅𝒓𝒊𝒑"
+    },
+    "alerts_owner": {
+      "userId": "3456789012",
+      "identityRoleId": "2109876543",
+      "jumpChannelId": "1407314815541575732",
+      "keyword": "alerts_owner",
+      "channelButtonLabel": "提醒频道"
+    }
+  },
+  "activeBlocks": {
+    "spot": {
+      "sourceChannelId": "源频道IDA",
+      "targetWebhook": "https://discord.com/api/webhooks/spot-target/xxxx",
+      "matchStrategy": "keyword"
+    },
+    "futures": {
+      "sourceChannelId": "源频道IDC",
+      "targetWebhook": "https://discord.com/api/webhooks/futures-target/yyyy",
+      "matchStrategy": "keyword"
+    },
+    "alerts": {
+      "sourceChannelId": "源频道IDD",
+      "targetWebhook": "https://discord.com/api/webhooks/alerts-target/zzzz",
+      "matchStrategy": "role"
+    }
   }
 }

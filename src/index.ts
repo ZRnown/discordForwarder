@@ -10,21 +10,37 @@ const config = await getConfig();
 
 // Build mapping from source channel IDs to webhook URLs
 const senderBotsBySource = new Map<string, SenderBot>();
+const senderBotsByWebhook = new Map<string, SenderBot>();
 let defaultSenderBot: SenderBot | undefined;
 const prepares: Promise<any>[] = [];
+
+const ensureSenderBot = (webhookUrl: string) => {
+  let existing = senderBotsByWebhook.get(webhookUrl);
+  if (existing) return existing;
+  const sb = new SenderBot({
+    chatsToSend: [],
+    replacementsDictionary: config.replacementsDictionary,
+    webhookUrl
+  });
+  senderBotsByWebhook.set(webhookUrl, sb);
+  prepares.push(sb.prepare());
+  return sb;
+};
 
 // 1) Base mapping from channelWebhooks
 if (config.channelWebhooks && Object.keys(config.channelWebhooks).length > 0) {
   for (const [channelId, webhookUrl] of Object.entries(config.channelWebhooks)) {
-    const sb = new SenderBot({
-      chatsToSend: [],
-      replacementsDictionary: config.replacementsDictionary,
-      webhookUrl
-    });
-    prepares.push(sb.prepare());
+    const sb = ensureSenderBot(webhookUrl);
     senderBotsBySource.set(channelId, sb);
     if (!defaultSenderBot) defaultSenderBot = sb;
   }
+}
+
+// 2) Pre-warm SenderBot instances defined via active blocks
+const activeBlocks = Object.values(config.activeBlocks ?? {});
+for (const block of activeBlocks) {
+  if (!block?.targetWebhook) continue;
+  ensureSenderBot(block.targetWebhook);
 }
 
 if (!defaultSenderBot) {
@@ -47,6 +63,6 @@ await Promise.all(prepares);
 
 const client: Client = new SelfBotClient();
 
-const bot = new Bot(client, config, defaultSenderBot!, senderBotsBySource);
+const bot = new Bot(client, config, defaultSenderBot!, senderBotsBySource, senderBotsByWebhook);
 
 bot.client.login(env.DISCORD_TOKEN);

@@ -10,6 +10,23 @@ export interface ChannelConfig {
   allowed: ChannelId[];
 }
 
+export type ActiveCategory = "spot" | "futures" | "alerts";
+
+export interface ActivePersonaConfig {
+  userId: ChannelId;
+  identityRoleId?: ChannelId;
+  jumpChannelId: ChannelId;
+  keyword?: string;
+  channelButtonLabel?: string;
+}
+
+export interface ActiveCategoryConfig {
+  sourceChannelIds?: ChannelId[];
+  sourceChannelId?: ChannelId;
+  targetWebhook: string;
+  matchStrategy?: "keyword" | "role" | "auto";
+}
+
 export interface Config {
   // 映射：源频道ID -> 目标Webhook URL（一对一）
   channelWebhooks?: Record<string, string>;
@@ -51,6 +68,8 @@ export interface Config {
       missingAccessCooldownMs?: number; // 某目标频道 Missing Access 后的冷却时间（默认 3600000 = 1h）
     };
   };
+  activeBlocks?: Partial<Record<ActiveCategory, ActiveCategoryConfig>>;
+  activePersonas?: Record<string, ActivePersonaConfig>;
 }
 
 export async function getConfig(): Promise<Config> {
@@ -70,7 +89,9 @@ export async function getConfig(): Promise<Config> {
       showMessageUpdates: false,
       showMessageDeletions: false,
       replacementsDictionary: {},
-      historyScan: { enabled: true }
+      historyScan: { enabled: true },
+      activeBlocks: {},
+      activePersonas: {}
     } satisfies Config);
 
     const formattedDefaultConfig = await prettier.format(defaultConfig, {
@@ -95,6 +116,21 @@ export async function getConfig(): Promise<Config> {
       config.channelConfigs[key].muted
     ])
   ];
+
+  const activeBlocks = Object.values(config.activeBlocks ?? {});
+  const activePersonas = Object.values(config.activePersonas ?? {});
+  for (const block of activeBlocks) {
+    if (!block) continue;
+    const ids = block.sourceChannelIds ?? (block.sourceChannelId ? [block.sourceChannelId] : []);
+    idTypes.push(ids);
+  }
+  for (const persona of activePersonas) {
+    idTypes.push(
+      [persona.userId, persona.identityRoleId, persona.jumpChannelId].filter(
+        (id): id is ChannelId => Boolean(id)
+      )
+    );
+  }
 
   testIDsType(idTypes.filter((ids) => ids != undefined).flat());
 
