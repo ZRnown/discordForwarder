@@ -136,10 +136,12 @@ export class Bot {
         this.logger.info(
           `activeBlocks: detected message update category=${active.key} channel=${resolved.channelId} message=${resolved.id}`
         );
+        this.logger.info(`[ACTIVE_BLOCKS] 🔄 检测到消息编辑事件！category=${active.key} channelId=${resolved.channelId} messageId=${resolved.id}`);
 
         await this.processAndSend(resolved);
       } catch (err) {
         this.logger.error(`activeBlocks: messageUpdate handler error: ${String(err)}`);
+        this.logger.error(`[ACTIVE_BLOCKS] ❌ 消息编辑处理失败: ${String(err)}`);
       }
     });
 
@@ -192,6 +194,7 @@ export class Bot {
       return null;
     }
     this.logger.info(`activeBlocks: matched category=${activeMatch.key}, targetWebhook=${activeMatch.config.targetWebhook}`);
+    this.logger.info(`[ACTIVE_BLOCKS] ⚡ 检测到 activeBlocks 活动！category=${activeMatch.key} channelId=${message.channelId} messageId=${message.id}`);
 
     const senderBot = this.getSenderForWebhook(activeMatch.config.targetWebhook);
     if (!senderBot) {
@@ -844,6 +847,10 @@ export class Bot {
     const activeOverride = await this.applyActiveOverrides(message, originalText);
     this.logger.info(`activeBlocks: processAndSend activeOverride=${activeOverride ? "found" : "null"}, userId=${activeOverride?.username || "none"}, avatarUrl=${activeOverride?.avatarUrl || "none"}`);
 
+    if (activeOverride) {
+      this.logger.info(`[ACTIVE_BLOCKS] ✨ 准备发送 activeBlocks 消息 category=${this.resolveActiveCategory(message.channelId)?.key || "unknown"} messageId=${message.id} username=${activeOverride.username || "none"}`);
+    }
+
     let sender = activeOverride?.senderBot || this.getSenderForChannel(message.channelId);
     if (!sender) {
       this.logger.debug(`跳过：未映射的源频道 channel=${message.channelId}`);
@@ -907,12 +914,12 @@ export class Bot {
     try {
       if (!avatarUrl) {
         this.logger.info(`activeBlocks: avatarUrl not in activeOverride, falling back to source author`);
-        const anyAuthor = message.author as any;
-        if (typeof anyAuthor.displayAvatarURL === "function") {
-          avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
-        } else if (typeof anyAuthor.avatarURL === "function") {
-          avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
-        }
+      const anyAuthor = message.author as any;
+      if (typeof anyAuthor.displayAvatarURL === "function") {
+        avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
+      } else if (typeof anyAuthor.avatarURL === "function") {
+        avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
+      }
         this.logger.info(`activeBlocks: fallback avatarUrl=${avatarUrl || "none"}`);
       }
     } catch (err) {
@@ -1061,10 +1068,18 @@ export class Bot {
         if (first.sourceMessageId) {
           this.sourceToTarget.set(first.sourceMessageId, { channelId: first.targetChannelId, messageId: first.targetMessageId });
           await this.saveMapping();
+          const activeCategory = this.resolveActiveCategory(message.channelId)?.key;
+          if (activeOverride) {
+            this.logger.info(`[ACTIVE_BLOCKS] ✅ 成功发送 activeBlocks 消息！category=${activeCategory || "unknown"} source=${first.sourceMessageId} -> target=${first.targetChannelId}/${first.targetMessageId}`);
+          }
           this.logger.info(`已转发: source=${first.sourceMessageId} -> target=${first.targetChannelId}/${first.targetMessageId}`);
         }
       }
     } catch (e) {
+      const activeCategory = this.resolveActiveCategory(message.channelId)?.key;
+      if (activeOverride) {
+        this.logger.error(`[ACTIVE_BLOCKS] ❌ activeBlocks 消息发送失败！category=${activeCategory || "unknown"} messageId=${message.id} error=${String(e)}`);
+      }
       this.logger.error(`转发失败: ${String(e)}`);
     }
   }
