@@ -49,6 +49,16 @@ const INLINE_PHRASE_MAP: Record<string, string> = {
   "not yet filled": "(尚未成交)"
 };
 
+const ALERT_ACTION_MAP: Record<string, string> = {
+  "stopped be": "止损移至保本价",
+  "stops moved to be": "止损移至保本价",
+  "closed in profits": "盈利平仓",
+  "closed be": "保本止损被触发",
+  "stopped out": "止损平仓",
+  "limit order filled": "限价订单已成交",
+  "updated stoploss, average entry, entry levels": "止损位已更新, 平均入场价, 分批入场点位"
+};
+
 const ZERO_WIDTH_REGEX = /[\u200B-\u200F\u2028\u2029\uFEFF\u2060]/g;
 
 const matchesId = (expected: ChannelId, actual: string) =>
@@ -157,8 +167,13 @@ export class Bot {
   }
 
   private async applyActiveOverrides(message: Message, originalText: string): Promise<ActiveOverrideResult | null> {
+    this.logger.info(`activeBlocks: applyActiveOverrides called for channelId=${message.channelId}`);
     const activeMatch = this.resolveActiveCategory(message.channelId);
-    if (!activeMatch) return null;
+    if (!activeMatch) {
+      this.logger.info(`activeBlocks: no active category matched for channelId=${message.channelId}`);
+      return null;
+    }
+    this.logger.info(`activeBlocks: matched category=${activeMatch.key}, targetWebhook=${activeMatch.config.targetWebhook}`);
 
     const senderBot = this.getSenderForWebhook(activeMatch.config.targetWebhook);
     if (!senderBot) {
@@ -175,7 +190,9 @@ export class Bot {
     const translated = await this.buildActiveContent(activeMatch.key, originalText, personaMatches);
     if (!translated) return null;
 
+    this.logger.info(`activeBlocks: resolving persona profile for userId=${personaMatches[0]?.config.userId}, category=${activeMatch.key}`);
     const personaProfile = await this.resolvePersonaProfile(personaMatches[0]?.config.userId);
+    this.logger.info(`activeBlocks: persona profile resolved: username=${personaProfile?.username || "none"}, avatar=${personaProfile?.avatarUrl || "none"}`);
     const personaDisplay = this.getPersonaDisplay(personaMatches[0]);
     // alerts 不在开头添加频道链接（已在 translateStoppedLine 中添加到末尾）
     const finalContent = (activeMatch.key === "alerts" || !personaDisplay)
@@ -200,15 +217,22 @@ export class Bot {
   }
 
   private resolveActiveCategory(channelId: string): { key: ActiveCategory; config: ActiveCategoryConfig } | undefined {
+    this.logger.info(`activeBlocks: resolveActiveCategory checking channelId=${channelId}, activeBlocks keys=${Object.keys(this.config.activeBlocks ?? {}).join(",")}`);
     const entries = Object.entries(this.config.activeBlocks ?? {}) as Array<[ActiveCategory, ActiveCategoryConfig | undefined]>;
     for (const [key, config] of entries) {
-      if (!config) continue;
+      if (!config) {
+        this.logger.info(`activeBlocks: resolveActiveCategory key=${key} has no config`);
+        continue;
+      }
       const ids = this.getBlockSourceIds(config);
+      this.logger.info(`activeBlocks: resolveActiveCategory key=${key} sourceIds=${ids.join(",")}`);
       if (ids.length === 0) continue;
       if (ids.some((id) => matchesId(id, channelId))) {
+        this.logger.info(`activeBlocks: resolveActiveCategory matched key=${key} for channelId=${channelId}`);
         return { key, config };
       }
     }
+    this.logger.info(`activeBlocks: resolveActiveCategory no match for channelId=${channelId}`);
     return undefined;
   }
 
@@ -466,6 +490,10 @@ export class Bot {
 
       // 其他情况：做行内替换，保持原行结构
       let processed = trimmed;
+      // 删除 "⁠未知" 和 "@用户名" 这样的内容
+      processed = processed.replace(/⁠未知/g, "");
+      processed = processed.replace(/@[A-Za-z0-9_]+/g, "");
+      processed = processed.replace(/⁠#未知/g, "");
       // 行内短语替换
       for (const [key, value] of Object.entries(INLINE_PHRASE_MAP)) {
         const regex = new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
@@ -478,8 +506,12 @@ export class Bot {
       processed = processed.replace(/\bAVG:\s*/gi, "平均: ");
       processed = processed.replace(/\bBE\b/gi, "成本价");
       processed = processed.replace(/\s*PnL:.*$/i, "");
+      // 清理多余空格
+      processed = processed.replace(/\s+/g, " ").trim();
       
-      output.push(processed);
+      if (processed) {
+        output.push(processed);
+      }
       pendingLabel = undefined;
       i++;
     }
@@ -597,56 +629,65 @@ export class Bot {
   }
 
   private translateStoppedLine(line: string, personaMatches: PersonaMatch[]): string[] | null {
-    if (!/Stopped\s+BE/i.test(line)) return null;
-
-    let processed = line;
-
-    // 替换 <:Spot:数字> / <:Short:数字> / <:Long:数字> 为 emoji
-    processed = processed.replace(/<:Spot:\d+>/gi, "🟡");
-    processed = processed.replace(/<:Short:\d+>/gi, "📉");
-    processed = processed.replace(/<:Long:\d+>/gi, "📈");
+    // 匹配 alerts 消息格式：<:Type:数字> **SYMBOL** https://...: ACTION <@&roleId>
+    // 或 :Type: **SYMBOL** https://...: ACTION <@&roleId>
+    // 使用更精确的正则表达式
+    const alertPattern = /^(<:(\w+):\d+>|:(\w+):)\s*\*\*([^*]+)\*\*\s*https:\/\/discord\.com\/channels\/\d+\/\d+\/\d+:?\s*(.+?)(?:\s*<@&\d+>)?\s*$/i;
+    let match = line.match(alertPattern);
     
-    // 替换 :Spot: / :Short: / :Long: 为 emoji（不带尖括号的格式）
-    processed = processed.replace(/:Spot:/gi, "🟡");
-    processed = processed.replace(/:Short:/gi, "📉");
-    processed = processed.replace(/:Long:/gi, "📈");
+    if (!match) {
+      // 尝试更宽松的匹配，允许 action 后面有其他内容
+      match = line.match(/^(<:(\w+):\d+>|:(\w+):)\s*\*\*([^*]+)\*\*\s*https:\/\/discord\.com\/channels\/\d+\/\d+\/\d+:?\s*(.+?)(?:\s*<@&\d+>)?/i);
+    }
+    
+    if (!match) return null;
 
-    // 提取 **SYMBOL** 中的 symbol
-    const symbolMatch = processed.match(/\*\*([^*]+)\*\*/);
-    const symbol = symbolMatch ? symbolMatch[1].trim() : "";
-    if (symbolMatch) {
-      processed = processed.replace(symbolMatch[0], symbol);
+    const typeLabel = match[2] || match[3] || ""; // :Short:, :Long:, :Spot:
+    const symbol = match[4]?.trim() || "";
+    const action = match[5]?.trim() || "";
+
+    if (!typeLabel || !symbol || !action) return null;
+    
+    this.logger.info(`activeBlocks: translateStoppedLine matched type=${typeLabel} symbol=${symbol} action=${action}`);
+
+    // 翻译 action
+    const normalizedAction = action.toLowerCase().trim();
+    let translatedAction = ALERT_ACTION_MAP[normalizedAction];
+    if (!translatedAction) {
+      // 处理 "Stops moved to [number]" 的情况
+      const stopsMovedMatch = normalizedAction.match(/^stops?\s+moved\s+to\s+(.+)$/i);
+      if (stopsMovedMatch) {
+        const target = stopsMovedMatch[1].trim();
+        if (target.toLowerCase() === "be") {
+          translatedAction = "止损移至保本价";
+        } else {
+          translatedAction = `止损移至 ${target}`;
+        }
+      } else {
+        // 尝试部分匹配
+        for (const [key, value] of Object.entries(ALERT_ACTION_MAP)) {
+          if (normalizedAction.includes(key)) {
+            translatedAction = value;
+            break;
+          }
+        }
+        // 如果还是找不到，使用原始 action
+        if (!translatedAction) {
+          translatedAction = action;
+        }
+      }
     }
 
-    // 省略 Discord 消息链接
-    processed = processed.replace(/https:\/\/discord\.com\/channels\/\d+\/\d+\/\d+:?\s*/gi, "");
+    // 获取所有匹配的 persona 频道链接
+    const personaChannelLinks = personaMatches
+      .filter(p => p.config.jumpChannelId)
+      .map(p => `<#${p.config.jumpChannelId}>`)
+      .join(" ");
 
-    // 翻译 Stopped BE
-    processed = processed.replace(/Stopped\s+BE/gi, "止损移至保本价");
+    // 构建最终格式：:Type: SYMBOL 💬 : 翻译后的action 频道链接
+    const result = `:${typeLabel}: ${symbol} 💬 : ${translatedAction}${personaChannelLinks ? ` ${personaChannelLinks}` : ""}`;
 
-    // 删除 role mention <@&...> (可能没有结尾的 >)
-    processed = processed.replace(/<@&\d+>?/g, "");
-
-    // 删除频道链接 <#...>
-    processed = processed.replace(/<#\d+>/g, "");
-
-    // 清理多余空格、冒号和换行
-    processed = processed.replace(/\s+/g, " ").trim();
-    processed = processed.replace(/:\s*$/, "").trim();
-    processed = processed.replace(/^\s*:\s*/, "").trim();
-
-    // 获取 persona 的频道链接，放在最后
-    const personaChannelLink =
-      personaMatches[0]?.config.jumpChannelId
-        ? `<#${personaMatches[0]!.config.jumpChannelId}>`
-        : "";
-
-    // 构建最终格式：emoji SYMBOL 止损移至保本价 频道链接
-    if (personaChannelLink) {
-      processed = `${processed} ${personaChannelLink}`;
-    }
-
-    return [processed];
+    return [result];
   }
 
   private async resolvePersonaProfile(userId?: ChannelId) {
@@ -783,6 +824,7 @@ export class Bot {
     const originalText = (renderOutput.content || "").trim();
 
     const activeOverride = await this.applyActiveOverrides(message, originalText);
+    this.logger.info(`activeBlocks: processAndSend activeOverride=${activeOverride ? "found" : "null"}, userId=${activeOverride?.username || "none"}, avatarUrl=${activeOverride?.avatarUrl || "none"}`);
 
     let sender = activeOverride?.senderBot || this.getSenderForChannel(message.channelId);
     if (!sender) {
@@ -841,16 +883,23 @@ export class Bot {
       message.author.username ||
       message.author.tag;
     let avatarUrl: string | undefined = activeOverride?.avatarUrl;
+    
+    this.logger.info(`activeBlocks: processAndSend avatarUrl from activeOverride=${avatarUrl || "none"}, username=${username}`);
+    
     try {
       if (!avatarUrl) {
-      const anyAuthor = message.author as any;
-      if (typeof anyAuthor.displayAvatarURL === "function") {
-        avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
-      } else if (typeof anyAuthor.avatarURL === "function") {
-        avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
+        this.logger.info(`activeBlocks: avatarUrl not in activeOverride, falling back to source author`);
+        const anyAuthor = message.author as any;
+        if (typeof anyAuthor.displayAvatarURL === "function") {
+          avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
+        } else if (typeof anyAuthor.avatarURL === "function") {
+          avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
         }
+        this.logger.info(`activeBlocks: fallback avatarUrl=${avatarUrl || "none"}`);
       }
-    } catch { }
+    } catch (err) {
+      this.logger.info(`activeBlocks: error getting fallback avatar: ${String(err)}`);
+    }
 
     // 收集当前消息的附件（图片/视频标记用于 embed 图像）
     const uploads: Array<{ url: string; filename: string; isImage?: boolean; isVideo?: boolean }> = [];
