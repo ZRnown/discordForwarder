@@ -125,6 +125,24 @@ export class Bot {
       await this.processAndSend(message);
     });
 
+    (this.client as any).on("messageUpdate", async (oldMessage: Message | PartialMessage, newMessage: Message | PartialMessage) => {
+      try {
+        const resolved = (newMessage.partial ? await newMessage.fetch() : newMessage) as Message;
+        if (!resolved?.channelId) return;
+
+        const active = this.resolveActiveCategory(resolved.channelId);
+        if (!active || (active.key !== "spot" && active.key !== "futures")) return;
+
+        this.logger.info(
+          `activeBlocks: detected message update category=${active.key} channel=${resolved.channelId} message=${resolved.id}`
+        );
+
+        await this.processAndSend(resolved);
+      } catch (err) {
+        this.logger.error(`activeBlocks: messageUpdate handler error: ${String(err)}`);
+      }
+    });
+
     // 移除 specialChannels 专用的 messageUpdate 监听
 
     // 为了支持“回复可跳转”，改为单条即时发送（如需保留堆叠，可另加配置开关）
