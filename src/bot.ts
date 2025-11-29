@@ -196,6 +196,28 @@ export class Bot {
     this.logger.info(`activeBlocks: matched category=${activeMatch.key}, targetWebhook=${activeMatch.config.targetWebhook}`);
     this.logger.info(`[ACTIVE_BLOCKS] ⚡ 检测到 activeBlocks 活动！category=${activeMatch.key} channelId=${message.channelId} messageId=${message.id}`);
 
+    // 很多 activeBlocks 消息（特别是 futures/spot）主要内容在 embed.description 里，
+    // 如果 originalText 为空，则回退到 embed 文本作为翻译与 persona 匹配的输入。
+    let effectiveText = originalText;
+    if (!effectiveText?.trim()) {
+      const embedParts: string[] = [];
+      try {
+        for (const embed of message.embeds) {
+          if (embed.title) embedParts.push(String(embed.title));
+          if (embed.description) embedParts.push(String(embed.description));
+        }
+      } catch { }
+      effectiveText = embedParts.join("\n").trim();
+      this.logger.info(
+        `activeBlocks: using embed text fallback, length=${effectiveText.length}, hasEmbeds=${message.embeds.length}`
+      );
+    }
+
+    if (!effectiveText?.trim()) {
+      this.logger.info("activeBlocks: effectiveText is empty after embed fallback, skip active overrides");
+      return null;
+    }
+
     const senderBot = this.getSenderForWebhook(activeMatch.config.targetWebhook);
     if (!senderBot) {
       this.logger.info(`activeBlocks: 未找到 target webhook 对应的 SenderBot (${activeMatch.config.targetWebhook})`);
@@ -204,11 +226,11 @@ export class Bot {
 
     const personas = this.resolvePersonasForBlock();
     const matchStrategy = activeMatch.config.matchStrategy ?? "auto";
-    let personaMatches = this.matchActivePersonas(message, originalText, personas, matchStrategy);
+    let personaMatches = this.matchActivePersonas(message, effectiveText, personas, matchStrategy);
     if (personaMatches.length === 0 && personas.length > 0) {
       personaMatches = [{ config: personas[0] }];
     }
-    const translated = await this.buildActiveContent(activeMatch.key, originalText, personaMatches);
+    const translated = await this.buildActiveContent(activeMatch.key, effectiveText, personaMatches);
     if (!translated) return null;
 
     this.logger.info(`activeBlocks: resolving persona profile for userId=${personaMatches[0]?.config.userId}, category=${activeMatch.key}`);
