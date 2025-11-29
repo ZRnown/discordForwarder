@@ -439,8 +439,8 @@ export class Bot {
     while (i < lines.length) {
       let trimmed = this.stripInvisible(lines[i]).trim();
       
-      // 跳过空行（但保留必要的分隔）
-      if (!trimmed) {
+      // 跳过空行或仅由星号构成的无意义行（但保留必要的分隔）
+      if (!trimmed || trimmed === "*" || trimmed === "**") {
         if (output.length > 0 && output[output.length - 1] !== "") {
           output.push("");
         }
@@ -539,6 +539,8 @@ export class Bot {
       processed = processed.replace(/⁠未知/g, "");
       processed = processed.replace(/@[A-Za-z0-9_]+/g, "");
       processed = processed.replace(/⁠#未知/g, "");
+      // 去掉整行包裹的 * 或 **（Markdown 粗体/斜体标记）
+      processed = processed.replace(/^\*+(.+?)\*+$/g, "$1");
       // 行内短语替换
       for (const [key, value] of Object.entries(INLINE_PHRASE_MAP)) {
         const regex = new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
@@ -687,7 +689,8 @@ export class Bot {
     
     if (!match) return null;
 
-    const typeLabel = match[2] || match[3] || ""; // :Short:, :Long:, :Spot:
+    const rawPrefix = match[1] || "";               // 原始前缀，可能是 <:Short:id> 或 :Short:
+    const typeLabel = match[2] || match[3] || "";   // 解析出的类型名 Short/Long/Spot
     const symbol = match[4]?.trim() || "";
     const action = match[5]?.trim() || "";
 
@@ -729,8 +732,9 @@ export class Bot {
       .map(p => `<#${p.config.jumpChannelId}>`)
       .join(" ");
 
-    // 构建最终格式：:Type: SYMBOL 💬 : 翻译后的action 频道链接
-    const result = `:${typeLabel}: ${symbol} 💬 : ${translatedAction}${personaChannelLinks ? ` ${personaChannelLinks}` : ""}`;
+    // 构建最终格式：保留原始表情前缀，避免从 <:Short:id> 退化为 :Short:
+    const emojiPrefix = rawPrefix || `:${typeLabel}:`;
+    const result = `${emojiPrefix} ${symbol} 💬 : ${translatedAction}${personaChannelLinks ? ` ${personaChannelLinks}` : ""}`;
 
     return [result];
   }
