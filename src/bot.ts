@@ -299,24 +299,61 @@ export class Bot {
     }));
   }
 
+  private collectChannelMentions(message: Message, text: string): Set<string> {
+    const ids = new Set<string>();
+    const collect = (input?: string | null) => {
+      if (!input) return;
+      const regex = /<#(\d+)>/g;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(input))) {
+        ids.add(match[1]);
+      }
+    };
+
+    collect(message.content);
+    collect(text);
+
+    try {
+      for (const embed of message.embeds ?? []) {
+        collect(embed.title);
+        collect(embed.description);
+        if (Array.isArray(embed.fields)) {
+          for (const field of embed.fields) {
+            collect(field?.name);
+            collect(field?.value);
+          }
+        }
+        collect(embed.footer?.text);
+      }
+    } catch { }
+
+    return ids;
+  }
+
   private matchActivePersonas(
     message: Message,
     originalText: string,
     personas: ActivePersonaConfig[],
-    strategy: "keyword" | "role" | "auto"
+    strategy: "keyword" | "role" | "auto" | "channel"
   ): PersonaMatch[] {
     const matches: PersonaMatch[] = [];
-    const combinedNormalized = this.normalizeMatchTarget(
-      `${message.content || ""}\n${originalText || ""}`
-    );
-    const tokenCandidates = this.extractMatchTokens(
-      `${message.content || ""}\n${originalText || ""}`
-    );
-    const checkKeyword = strategy === "keyword" || strategy === "auto";
-    const checkRole = strategy === "role" || strategy === "auto";
+    const combinedRaw = `${message.content || ""}\n${originalText || ""}`;
+    const combinedNormalized = this.normalizeMatchTarget(combinedRaw);
+    const tokenCandidates = this.extractMatchTokens(combinedRaw);
+    const referencedChannelIds = this.collectChannelMentions(message, combinedRaw);
+    const preferChannelOnly = strategy === "channel";
+    const checkKeyword = !preferChannelOnly && (strategy === "keyword" || strategy === "auto");
+    const checkRole = !preferChannelOnly && (strategy === "role" || strategy === "auto");
 
     for (const persona of personas) {
       let matched = false;
+      if (persona.sourceChannelId) {
+        const id = String(persona.sourceChannelId);
+        if (referencedChannelIds.has(id)) {
+          matched = true;
+        }
+      }
+
       if (checkKeyword && persona.keyword) {
         const kw = this.normalizeMatchTarget(persona.keyword);
         if (
@@ -334,7 +371,7 @@ export class Bot {
           Boolean((message as any).member?.roles?.cache?.has?.(roleId)) ||
           (message.content || "").includes(`<@&${roleId}>`);
       }
-      if (!matched && persona.userId) {
+      if (!matched && persona.userId && !preferChannelOnly) {
         matched = matchesId(persona.userId, message.author?.id || "");
       }
       if (matched) {
@@ -392,34 +429,62 @@ export class Bot {
   }
 
   private stripPersonaMarkers(raw: string, personaMatches: PersonaMatch[]) {
-    const personaNames = personaMatches
-      .map((p) => this.normalizeMatchTarget(String(p.config.keyword || "")))
-      .filter(Boolean);
+    const personaInfos = personaMatches.map((match) => ({
+      match,
+      keyword: this.normalizeMatchTarget(String(match.config.keyword || "")) || undefined,
+      jumpChannelId: match.config.jumpChannelId ? String(match.config.jumpChannelId) : undefined,
+      sourceChannelId: match.config.sourceChannelId ? String(match.config.sourceChannelId) : undefined
+    }));
+
+    const insertedJumpIds = new Set<string>();
 
     const lines = this.stripInvisible(raw)
       .replace(/\r/g, "")
       .split("\n");
 
-    const filtered = lines.filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return false;
-      if (/^PnL:/i.test(trimmed)) return false;
-      const norm = this.normalizeMatchTarget(trimmed);
-      if (
-        personaNames.some(
-          (name) =>
-            name &&
-            (norm.includes(name) ||
-              this.levenshteinWithin(norm, name, 1) ||
-              this.levenshteinWithin(name, norm, 1))
-        )
-      ) {
-        return false;
-      }
-      return true;
-    });
+    const result: string[] = [];
 
-    return filtered.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (/^PnL:/i.test(trimmed)) continue;
+      const norm = this.normalizeMatchTarget(trimmed);
+      let handled = false;
+
+      for (const info of personaInfos) {
+        if (!info.keyword && !info.sourceChannelId) continue;
+
+        let matchesKeyword = false;
+        if (info.keyword) {
+          matchesKeyword =
+            norm.includes(info.keyword) ||
+            this.levenshteinWithin(norm, info.keyword, 1) ||
+            this.levenshteinWithin(info.keyword, norm, 1);
+        }
+
+        const sourceMention = info.sourceChannelId ? `<#${info.sourceChannelId}>` : undefined;
+        const matchesSource = sourceMention ? trimmed.includes(sourceMention) : false;
+
+        if (matchesKeyword || matchesSource) {
+          const jumpId = info.jumpChannelId;
+          if (jumpId) {
+            const channelMarkup = `<#${jumpId}>`;
+            if (!insertedJumpIds.has(channelMarkup)) {
+              result.push(channelMarkup);
+              insertedJumpIds.add(channelMarkup);
+            }
+          }
+          handled = true;
+          break;
+        }
+      }
+
+      if (!handled) {
+        result.push(trimmed);
+      }
+    }
+
+    return result.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   }
 
   private formatStructuredActiveBlock(raw: string, personaMatches: PersonaMatch[]): string {
@@ -546,6 +611,8 @@ export class Bot {
       } else {
         processed = processed.replace(/⁠未知/g, "");
       }
+      processed = processed.replace(/\bw\/\s*@\S+/gi, "");
+      processed = processed.replace(/@未知身份组/gi, "");
       processed = processed.replace(/@[A-Za-z0-9_]+/g, "");
       processed = processed.replace(/⁠#未知/g, "");
       // 去掉整行包裹的 * 或 **（Markdown 粗体/斜体标记）
@@ -594,7 +661,8 @@ export class Bot {
     const finalLines: string[] = [];
     for (let j = 0; j < cleaned.length; j++) {
       const line = cleaned[j];
-      if (line === "") {
+      const trimmedLine = line.trim();
+      if (trimmedLine === "") {
         const prev = cleaned[j - 1];
         const next = cleaned[j + 1];
         if (
@@ -606,8 +674,14 @@ export class Bot {
           // 跳过这一行空行
           continue;
         }
+        // 避免出现连续空行
+        if (finalLines.length > 0 && finalLines[finalLines.length - 1].trim() === "") {
+          continue;
+        }
+        finalLines.push("");
+        continue;
       }
-      finalLines.push(line);
+      finalLines.push(trimmedLine);
     }
 
     return finalLines.join("\n").trim();
@@ -1099,13 +1173,10 @@ export class Bot {
       }
     } catch { }
 
-    // activeBlocks 消息去重：若本次最终文本与上一次发送的一致，则跳过，避免同一条源消息被反复编辑但内容不变造成刷屏
+    // activeBlocks 消息去重：若本次最终文本与上一次发送的一致，则静默跳过（不再输出日志，避免刷屏）
     if (activeOverride) {
       const last = this.activeLastSent.get(message.id);
       if (last && last === finalText) {
-        this.logger.info(
-          `[ACTIVE_BLOCKS] ⏭️ 内容未变化，跳过转发 source=${message.id} channel=${message.channelId}`
-        );
         return;
       }
       this.activeLastSent.set(message.id, finalText);

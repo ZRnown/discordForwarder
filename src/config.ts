@@ -16,6 +16,7 @@ export interface ActivePersonaConfig {
   userId: ChannelId;
   identityRoleId?: ChannelId;
   jumpChannelId: ChannelId;
+  sourceChannelId?: ChannelId;
   keyword?: string;
   channelButtonLabel?: string;
 }
@@ -24,7 +25,7 @@ export interface ActiveCategoryConfig {
   sourceChannelIds?: ChannelId[];
   sourceChannelId?: ChannelId;
   targetWebhook: string;
-  matchStrategy?: "keyword" | "role" | "auto";
+  matchStrategy?: "keyword" | "role" | "auto" | "channel";
 }
 
 export interface Config {
@@ -126,7 +127,7 @@ export async function getConfig(): Promise<Config> {
   }
   for (const persona of activePersonas) {
     idTypes.push(
-      [persona.userId, persona.identityRoleId, persona.jumpChannelId].filter(
+      [persona.userId, persona.identityRoleId, persona.jumpChannelId, persona.sourceChannelId].filter(
         (id): id is ChannelId => Boolean(id)
       )
     );
