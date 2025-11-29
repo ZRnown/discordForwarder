@@ -77,6 +77,8 @@ export class Bot {
   client: Client;
   // 源消息ID -> 目标消息ID映射（用于构建目标内跳转链接）
   private sourceToTarget = new Map<string, { channelId: string; messageId: string }>();
+  // activeBlocks 消息：源消息ID -> 最近一次已发送内容（用于去重，避免重复编辑但内容相同导致刷屏）
+  private activeLastSent = new Map<string, string>();
   private env = getEnv();
   private mapFile = path.resolve(process.cwd(), ".data", "message_map.json");
   private logger = new FileLogger();
@@ -1061,6 +1063,18 @@ export class Bot {
         }
       }
     } catch { }
+
+    // activeBlocks 消息去重：若本次最终文本与上一次发送的一致，则跳过，避免同一条源消息被反复编辑但内容不变造成刷屏
+    if (activeOverride) {
+      const last = this.activeLastSent.get(message.id);
+      if (last && last === finalText) {
+        this.logger.info(
+          `[ACTIVE_BLOCKS] ⏭️ 内容未变化，跳过转发 source=${message.id} channel=${message.channelId}`
+        );
+        return;
+      }
+      this.activeLastSent.set(message.id, finalText);
+    }
 
     const toSend = [{
       content: finalText,
