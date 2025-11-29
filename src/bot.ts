@@ -97,6 +97,18 @@ export class Bot {
     this.senderBotsBySource = senderBotsBySource;
     this.senderBotsByWebhook = senderBotsByWebhook;
 
+    // 初始化时记录 activeBlocks 配置
+    const activeBlocksKeys = config.activeBlocks ? Object.keys(config.activeBlocks) : [];
+    this.logger.info(`[INIT] Bot initialized with activeBlocks keys=${activeBlocksKeys.join(",")}, count=${activeBlocksKeys.length}`);
+    if (config.activeBlocks) {
+      for (const [key, blockConfig] of Object.entries(config.activeBlocks)) {
+        const sourceIds = blockConfig?.sourceChannelId ? [blockConfig.sourceChannelId] : (blockConfig?.sourceChannelIds || []);
+        this.logger.info(`[INIT] activeBlocks.${key}: sourceChannelId=${blockConfig?.sourceChannelId || "none"}, sourceChannelIds=${sourceIds.join(",")}, targetWebhook=${blockConfig?.targetWebhook ? "set" : "none"}`);
+      }
+    } else {
+      this.logger.info(`[INIT] ⚠️ config.activeBlocks is ${config.activeBlocks === undefined ? "undefined" : "null"}`);
+    }
+
     // 保留可选的通用日志过滤（仅按 filterPattern）
     try {
       const logCfg = this.config.logging || ({} as any);
@@ -135,37 +147,18 @@ export class Bot {
         const active = this.resolveActiveCategory(resolved.channelId);
         if (!active || (active.key !== "spot" && active.key !== "futures")) return;
 
-        // 检查内容是否与上次相同，如果相同则不显示日志也不处理
-        const lastSent = this.activeLastSent.get(resolved.id);
-        if (lastSent) {
-          // 快速获取当前消息的最终文本内容用于比较
-          let effectiveText = resolved.content || "";
-          if (!effectiveText?.trim()) {
-            const embedParts: string[] = [];
-            try {
-              for (const embed of resolved.embeds) {
-                if (embed.title) embedParts.push(String(embed.title));
-                if (embed.description) embedParts.push(String(embed.description));
-              }
-            } catch { }
-            effectiveText = embedParts.join("\n").trim();
-          }
-          
-          if (effectiveText) {
-            const personas = this.resolvePersonasForBlock();
-            const matchStrategy = active.config.matchStrategy ?? "auto";
-            let personaMatches = this.matchActivePersonas(resolved, effectiveText, personas, matchStrategy);
-            if (personaMatches.length === 0 && personas.length > 0) {
-              personaMatches = [{ config: personas[0] }];
-            }
-            const translated = await this.buildActiveContent(active.key, effectiveText, personaMatches);
-            if (translated && translated.trim() === lastSent) {
-              // 内容相同，静默处理，不显示日志也不处理
-              return;
-            }
-          }
+        // 先调用 applyActiveOverrides 检查内容是否与上次相同
+        // applyActiveOverrides 内部已经做了去重检查，如果内容相同会返回 null
+        const renderOutput = await this.messageAction(resolved, undefined);
+        const originalText = (renderOutput.content || "").trim();
+        const activeOverride = await this.applyActiveOverrides(resolved, originalText);
+        
+        // 如果 activeOverride 是 null，说明内容相同（已被去重），静默返回
+        if (!activeOverride) {
+          return;
         }
 
+        // 内容不同，显示日志并处理
         this.logger.info(
           `activeBlocks: detected message update category=${active.key} channel=${resolved.channelId} message=${resolved.id}`
         );
@@ -220,14 +213,10 @@ export class Bot {
   }
 
   private async applyActiveOverrides(message: Message, originalText: string): Promise<ActiveOverrideResult | null> {
-    this.logger.info(`activeBlocks: applyActiveOverrides called for channelId=${message.channelId}`);
     const activeMatch = this.resolveActiveCategory(message.channelId);
     if (!activeMatch) {
-      this.logger.info(`activeBlocks: no active category matched for channelId=${message.channelId}`);
       return null;
     }
-    this.logger.info(`activeBlocks: matched category=${activeMatch.key}, targetWebhook=${activeMatch.config.targetWebhook}`);
-    this.logger.info(`[ACTIVE_BLOCKS] ⚡ 检测到 activeBlocks 活动！category=${activeMatch.key} channelId=${message.channelId} messageId=${message.id}`);
 
     // 很多 activeBlocks 消息（特别是 futures/spot）主要内容在 embed.description 里，
     // 如果 originalText 为空，则回退到 embed 文本作为翻译与 persona 匹配的输入。
@@ -241,19 +230,14 @@ export class Bot {
         }
       } catch { }
       effectiveText = embedParts.join("\n").trim();
-      this.logger.info(
-        `activeBlocks: using embed text fallback, length=${effectiveText.length}, hasEmbeds=${message.embeds.length}`
-      );
     }
 
     if (!effectiveText?.trim()) {
-      this.logger.info("activeBlocks: effectiveText is empty after embed fallback, skip active overrides");
       return null;
     }
 
     const senderBot = this.getSenderForWebhook(activeMatch.config.targetWebhook);
     if (!senderBot) {
-      this.logger.info(`activeBlocks: 未找到 target webhook 对应的 SenderBot (${activeMatch.config.targetWebhook})`);
       return null;
     }
 
@@ -265,6 +249,57 @@ export class Bot {
     }
     const translated = await this.buildActiveContent(activeMatch.key, effectiveText, personaMatches);
     if (!translated) return null;
+
+    // 在输出日志之前，先检查内容是否与上次相同
+    const lastSent = this.activeLastSent.get(message.id);
+    if (lastSent) {
+      // 快速计算 finalText 用于去重检查（包括回复头部，但不包括翻译）
+      let quickFinalText = translated.trim();
+      
+      // 如果有回复，添加回复头部
+      if (message.reference?.messageId) {
+        let authorName: string | undefined;
+        try {
+          const ru: any = (message as any).mentions?.repliedUser;
+          if (ru) {
+            authorName = ru.globalName || ru.username || ru.tag;
+          }
+        } catch { }
+        if (!authorName) {
+          try {
+            const ref = await message.fetchReference();
+            authorName = (ref.author as any)?.globalName || ref.author?.username || ref.author?.tag || undefined;
+          } catch { }
+        }
+        if (!authorName) authorName = "某条消息";
+        const gid = message.guildId || "@me";
+        const refChan = message.reference.channelId || message.channelId;
+        const replyUrl = `https://discord.com/channels/${gid}/${refChan}/${message.reference.messageId}`;
+        quickFinalText = `↳ @${authorName} • ${replyUrl}\n${quickFinalText}`;
+      }
+      
+      // 检查是否与上次相同（允许部分匹配，因为 finalText 可能包含翻译）
+      const normalizedLast = lastSent.trim();
+      const normalizedCurrent = quickFinalText.trim();
+      if (normalizedLast === normalizedCurrent || 
+          normalizedLast.endsWith(normalizedCurrent) || 
+          normalizedCurrent.endsWith(normalizedLast) ||
+          (normalizedLast.includes(normalizedCurrent) && normalizedCurrent.length > 50)) {
+        // 内容相同，静默返回，不输出任何日志
+        return null;
+      }
+    }
+
+    // 内容不同，输出日志并继续处理
+    this.logger.info(`activeBlocks: applyActiveOverrides called for channelId=${message.channelId}`);
+    this.logger.info(`activeBlocks: matched category=${activeMatch.key}, targetWebhook=${activeMatch.config.targetWebhook}`);
+    this.logger.info(`[ACTIVE_BLOCKS] ⚡ 检测到 activeBlocks 活动！category=${activeMatch.key} channelId=${message.channelId} messageId=${message.id}`);
+    
+    if (!originalText?.trim() && effectiveText) {
+      this.logger.info(
+        `activeBlocks: using embed text fallback, length=${effectiveText.length}, hasEmbeds=${message.embeds.length}`
+      );
+    }
 
     const matchedPersona = personaMatches[0]?.config;
     this.logger.info(`[ACTIVE_BLOCKS] 🔍 开始查找 persona 头像和名字 userId=${matchedPersona?.userId || "none"} keyword=${matchedPersona?.keyword || "none"} category=${activeMatch.key}`);
@@ -291,22 +326,20 @@ export class Bot {
   }
 
   private resolveActiveCategory(channelId: string): { key: ActiveCategory; config: ActiveCategoryConfig } | undefined {
-    this.logger.info(`activeBlocks: resolveActiveCategory checking channelId=${channelId}, activeBlocks keys=${Object.keys(this.config.activeBlocks ?? {}).join(",")}`);
-    const entries = Object.entries(this.config.activeBlocks ?? {}) as Array<[ActiveCategory, ActiveCategoryConfig | undefined]>;
+    const activeBlocks = this.config.activeBlocks;
+    if (!activeBlocks || Object.keys(activeBlocks).length === 0) {
+      return undefined;
+    }
+    
+    const entries = Object.entries(activeBlocks) as Array<[ActiveCategory, ActiveCategoryConfig | undefined]>;
     for (const [key, config] of entries) {
-      if (!config) {
-        this.logger.info(`activeBlocks: resolveActiveCategory key=${key} has no config`);
-        continue;
-      }
+      if (!config) continue;
       const ids = this.getBlockSourceIds(config);
-      this.logger.info(`activeBlocks: resolveActiveCategory key=${key} sourceIds=${ids.join(",")}`);
       if (ids.length === 0) continue;
       if (ids.some((id) => matchesId(id, channelId))) {
-        this.logger.info(`activeBlocks: resolveActiveCategory matched key=${key} for channelId=${channelId}`);
         return { key, config };
       }
     }
-    this.logger.info(`activeBlocks: resolveActiveCategory no match for channelId=${channelId}`);
     return undefined;
   }
 
@@ -1028,6 +1061,50 @@ export class Bot {
     const originalText = (renderOutput.content || "").trim();
 
     const activeOverride = await this.applyActiveOverrides(message, originalText);
+    
+    // 对于 activeBlocks 消息，提前检查去重（在输出日志之前）
+    if (activeOverride) {
+      // 快速计算 finalText 用于去重检查（包括回复头部，但不包括翻译）
+      let quickFinalText = activeOverride.content ?? originalText;
+      
+      // 如果有回复，添加回复头部（简化版本，用于去重检查）
+      if (message.reference?.messageId) {
+        let authorName: string | undefined;
+        try {
+          const ru: any = (message as any).mentions?.repliedUser;
+          if (ru) {
+            authorName = ru.globalName || ru.username || ru.tag;
+          }
+        } catch { }
+        if (!authorName) {
+          try {
+            const ref = await message.fetchReference();
+            authorName = (ref.author as any)?.globalName || ref.author?.username || ref.author?.tag || undefined;
+          } catch { }
+        }
+        if (!authorName) authorName = "某条消息";
+        const gid = message.guildId || "@me";
+        const refChan = message.reference.channelId || message.channelId;
+        const replyUrl = `https://discord.com/channels/${gid}/${refChan}/${message.reference.messageId}`;
+        quickFinalText = `↳ @${authorName} • ${replyUrl}\n${quickFinalText}`;
+      }
+      
+      // 检查是否与上次相同（允许部分匹配，因为 finalText 可能包含翻译）
+      const last = this.activeLastSent.get(message.id);
+      if (last) {
+        // 如果上次的内容包含当前内容，或者当前内容包含上次内容，认为是重复
+        const normalizedLast = last.trim();
+        const normalizedCurrent = quickFinalText.trim();
+        if (normalizedLast === normalizedCurrent || 
+            normalizedLast.endsWith(normalizedCurrent) || 
+            normalizedCurrent.endsWith(normalizedLast) ||
+            (normalizedLast.includes(normalizedCurrent) && normalizedCurrent.length > 50)) {
+          // 内容相同，静默跳过，不输出任何日志
+          return;
+        }
+      }
+    }
+
     this.logger.info(`activeBlocks: processAndSend activeOverride=${activeOverride ? "found" : "null"}, userId=${activeOverride?.username || "none"}, avatarUrl=${activeOverride?.avatarUrl || "none"}`);
 
     if (activeOverride) {
@@ -1115,14 +1192,14 @@ export class Bot {
     } else {
       // 非 activeBlocks 消息，使用源作者信息
       username = (message.author as any)?.globalName || message.author.username || message.author.tag;
-      try {
-        const anyAuthor = message.author as any;
-        if (typeof anyAuthor.displayAvatarURL === "function") {
-          avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
-        } else if (typeof anyAuthor.avatarURL === "function") {
-          avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
-        }
-      } catch { }
+    try {
+      const anyAuthor = message.author as any;
+      if (typeof anyAuthor.displayAvatarURL === "function") {
+        avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
+      } else if (typeof anyAuthor.avatarURL === "function") {
+        avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
+      }
+    } catch { }
     }
 
     // 收集当前消息的附件（图片/视频标记用于 embed 图像）
@@ -1239,12 +1316,8 @@ export class Bot {
       }
     } catch { }
 
-    // activeBlocks 消息去重：若本次最终文本与上一次发送的一致，则静默跳过（不再输出日志，避免刷屏）
+    // activeBlocks 消息去重：保存最终文本（去重检查已在前面完成）
     if (activeOverride) {
-      const last = this.activeLastSent.get(message.id);
-      if (last && last === finalText) {
-        return;
-      }
       this.activeLastSent.set(message.id, finalText);
     }
 
