@@ -135,6 +135,37 @@ export class Bot {
         const active = this.resolveActiveCategory(resolved.channelId);
         if (!active || (active.key !== "spot" && active.key !== "futures")) return;
 
+        // 检查内容是否与上次相同，如果相同则不显示日志也不处理
+        const lastSent = this.activeLastSent.get(resolved.id);
+        if (lastSent) {
+          // 快速获取当前消息的最终文本内容用于比较
+          let effectiveText = resolved.content || "";
+          if (!effectiveText?.trim()) {
+            const embedParts: string[] = [];
+            try {
+              for (const embed of resolved.embeds) {
+                if (embed.title) embedParts.push(String(embed.title));
+                if (embed.description) embedParts.push(String(embed.description));
+              }
+            } catch { }
+            effectiveText = embedParts.join("\n").trim();
+          }
+          
+          if (effectiveText) {
+            const personas = this.resolvePersonasForBlock();
+            const matchStrategy = active.config.matchStrategy ?? "auto";
+            let personaMatches = this.matchActivePersonas(resolved, effectiveText, personas, matchStrategy);
+            if (personaMatches.length === 0 && personas.length > 0) {
+              personaMatches = [{ config: personas[0] }];
+            }
+            const translated = await this.buildActiveContent(active.key, effectiveText, personaMatches);
+            if (translated && translated.trim() === lastSent) {
+              // 内容相同，静默处理，不显示日志也不处理
+              return;
+            }
+          }
+        }
+
         this.logger.info(
           `activeBlocks: detected message update category=${active.key} channel=${resolved.channelId} message=${resolved.id}`
         );
@@ -235,9 +266,10 @@ export class Bot {
     const translated = await this.buildActiveContent(activeMatch.key, effectiveText, personaMatches);
     if (!translated) return null;
 
-    this.logger.info(`activeBlocks: resolving persona profile for userId=${personaMatches[0]?.config.userId}, category=${activeMatch.key}`);
-    const personaProfile = await this.resolvePersonaProfile(personaMatches[0]?.config.userId);
-    this.logger.info(`activeBlocks: persona profile resolved: username=${personaProfile?.username || "none"}, avatar=${personaProfile?.avatarUrl || "none"}`);
+    const matchedPersona = personaMatches[0]?.config;
+    this.logger.info(`[ACTIVE_BLOCKS] 🔍 开始查找 persona 头像和名字 userId=${matchedPersona?.userId || "none"} keyword=${matchedPersona?.keyword || "none"} category=${activeMatch.key}`);
+    const personaProfile = await this.resolvePersonaProfile(matchedPersona?.userId, message);
+    this.logger.info(`[ACTIVE_BLOCKS] 📋 persona 查找结果: userId=${matchedPersona?.userId || "none"} username=${personaProfile?.username || "none"} avatar=${personaProfile?.avatarUrl ? "found" : "none"}`);
     const personaDisplay = this.getPersonaDisplay(personaMatches[0]);
     // alerts 不在开头添加频道链接（已在 translateStoppedLine 中添加到末尾）
     const finalContent = (activeMatch.key === "alerts" || !personaDisplay)
@@ -250,11 +282,8 @@ export class Bot {
     return {
       content: finalContent,
       senderBot,
-      username:
-        personaProfile?.username ||
-        personaMatches[0]?.config.channelButtonLabel ||
-        personaMatches[0]?.config.keyword ||
-        personaDisplay,
+      // 始终优先使用 userId 查到的用户名；若获取失败，则退回源作者名称
+      username: personaProfile?.username,
       avatarUrl: personaProfile?.avatarUrl,
       useEmbed: true,
       components: overrideButtons
@@ -341,12 +370,13 @@ export class Bot {
     const combinedNormalized = this.normalizeMatchTarget(combinedRaw);
     const tokenCandidates = this.extractMatchTokens(combinedRaw);
     const referencedChannelIds = this.collectChannelMentions(message, combinedRaw);
-    const preferChannelOnly = strategy === "channel";
-    const checkKeyword = !preferChannelOnly && (strategy === "keyword" || strategy === "auto");
-    const checkRole = !preferChannelOnly && (strategy === "role" || strategy === "auto");
+    const checkKeyword = strategy === "keyword" || strategy === "auto" || strategy === "channel";
+    const checkRole = strategy === "role" || strategy === "auto" || strategy === "channel";
 
     for (const persona of personas) {
       let matched = false;
+
+      // 1. 优先根据 sourceChannelId 与消息/Embed 中出现的频道链接匹配
       if (persona.sourceChannelId) {
         const id = String(persona.sourceChannelId);
         if (referencedChannelIds.has(id)) {
@@ -354,7 +384,8 @@ export class Bot {
         }
       }
 
-      if (checkKeyword && persona.keyword) {
+      // 2. 关键字匹配（除非显式关闭）
+      if (!matched && checkKeyword && persona.keyword) {
         const kw = this.normalizeMatchTarget(persona.keyword);
         if (
           kw &&
@@ -364,6 +395,8 @@ export class Bot {
           matched = true;
         }
       }
+
+      // 3. 角色匹配
       if (!matched && checkRole && persona.identityRoleId) {
         const roleId = String(persona.identityRoleId);
         matched =
@@ -371,9 +404,12 @@ export class Bot {
           Boolean((message as any).member?.roles?.cache?.has?.(roleId)) ||
           (message.content || "").includes(`<@&${roleId}>`);
       }
-      if (!matched && persona.userId && !preferChannelOnly) {
+
+      // 4. userId 匹配（始终允许，作为最后兜底）
+      if (!matched && persona.userId) {
         matched = matchesId(persona.userId, message.author?.id || "");
       }
+
       if (matched) {
         matches.push({ config: persona });
       }
@@ -436,8 +472,6 @@ export class Bot {
       sourceChannelId: match.config.sourceChannelId ? String(match.config.sourceChannelId) : undefined
     }));
 
-    const insertedJumpIds = new Set<string>();
-
     const lines = this.stripInvisible(raw)
       .replace(/\r/g, "")
       .split("\n");
@@ -449,8 +483,10 @@ export class Bot {
       if (!trimmed) continue;
       if (/^PnL:/i.test(trimmed)) continue;
       const norm = this.normalizeMatchTarget(trimmed);
-      let handled = false;
 
+      // 若该行只是 persona 标记（昵称、源频道等），则丢弃，不再保留到正文中，
+      // 只依赖顶部 personaDisplay(jumpChannel) 来展示人物频道。
+      let isPersonaMarker = false;
       for (const info of personaInfos) {
         if (!info.keyword && !info.sourceChannelId) continue;
 
@@ -466,20 +502,12 @@ export class Bot {
         const matchesSource = sourceMention ? trimmed.includes(sourceMention) : false;
 
         if (matchesKeyword || matchesSource) {
-          const jumpId = info.jumpChannelId;
-          if (jumpId) {
-            const channelMarkup = `<#${jumpId}>`;
-            if (!insertedJumpIds.has(channelMarkup)) {
-              result.push(channelMarkup);
-              insertedJumpIds.add(channelMarkup);
-            }
-          }
-          handled = true;
+          isPersonaMarker = true;
           break;
         }
       }
 
-      if (!handled) {
+      if (!isPersonaMarker) {
         result.push(trimmed);
       }
     }
@@ -844,7 +872,7 @@ export class Bot {
     return [result];
   }
 
-  private async resolvePersonaProfile(userId?: ChannelId) {
+  private async resolvePersonaProfile(userId?: ChannelId, message?: Message) {
     if (!userId && userId !== 0) {
       this.logger.info(`activeBlocks: resolvePersonaProfile called with invalid userId: ${userId}`);
       return null;
@@ -855,66 +883,82 @@ export class Bot {
     if (this.personaProfileCache.has(id)) {
       const cached = this.personaProfileCache.get(id)!;
       this.logger.info(
-        `activeBlocks: persona profile from cache id=${id} username=${cached.username} avatar=${cached.avatarUrl || "none"}`
+        `[ACTIVE_BLOCKS] 💾 从缓存获取 persona profile userId=${id} username=${cached.username} avatar=${cached.avatarUrl ? "已缓存" : "无"}`
       );
       return cached;
     }
 
-    this.logger.info(`activeBlocks: fetching persona profile for userId=${id}`);
+    this.logger.info(`[ACTIVE_BLOCKS] 🔍 开始通过 userId 查找用户信息 userId=${id}`);
     
     try {
-      const userManager: any = (this.client as any)?.users;
-      this.logger.info(`activeBlocks: userManager available: ${!!userManager}, cache available: ${!!userManager?.cache}`);
+      let user: any = null;
       
-      let user: any = userManager?.cache?.get?.(id);
-      this.logger.info(`activeBlocks: user from cache: ${!!user}`);
-      
-      if (!user && typeof userManager?.fetch === "function") {
-        this.logger.info(`activeBlocks: attempting to fetch user ${id} with force=true`);
+      // 直接从 guild.members 中查找（禁止使用 users.fetch）
+      if (message?.guild) {
+        this.logger.info(`[ACTIVE_BLOCKS] 🔄 从 guild.members 查找用户 userId=${id} guildId=${message.guild.id}`);
         try {
-          user = await userManager.fetch(id, { force: true });
-          this.logger.info(`activeBlocks: user fetched with force=true: ${!!user}`);
-        } catch (forceErr) {
-          this.logger.info(`activeBlocks: force fetch failed, trying normal fetch: ${String(forceErr)}`);
-          try {
-            user = await userManager.fetch(id);
-            this.logger.info(`activeBlocks: user fetched with normal fetch: ${!!user}`);
-          } catch (normalErr) {
-            this.logger.info(`activeBlocks: normal fetch also failed: ${String(normalErr)}`);
+          const guild: any = message.guild;
+          const members: any = guild?.members;
+          if (members) {
+            // 先尝试从缓存获取
+            let member = members.cache?.get?.(id);
+            if (member) {
+              this.logger.info(`[ACTIVE_BLOCKS] ✅ 从 guild.members.cache 找到用户 userId=${id}`);
+              user = member.user;
+            } else if (typeof members.fetch === "function") {
+              // 如果缓存没有，尝试 fetch
+              this.logger.info(`[ACTIVE_BLOCKS] 从 guild.members.cache 未找到，尝试 fetch userId=${id}`);
+              try {
+                member = await members.fetch(id);
+                if (member) {
+                  this.logger.info(`[ACTIVE_BLOCKS] ✅ 从 guild.members.fetch 找到用户 userId=${id}`);
+                  user = member.user;
+                }
+              } catch (memberErr) {
+                this.logger.info(`[ACTIVE_BLOCKS] ❌ guild.members.fetch 失败 userId=${id} error=${String(memberErr)}`);
+              }
+            }
           }
+        } catch (guildErr) {
+          this.logger.info(`[ACTIVE_BLOCKS] ❌ 从 guild.members 查找时发生异常 userId=${id} error=${String(guildErr)}`);
         }
-      } else if (!userManager?.fetch) {
-        this.logger.info(`activeBlocks: userManager.fetch is not available`);
+      } else {
+        this.logger.info(`[ACTIVE_BLOCKS] ⚠️ 消息没有 guild 信息，无法从 guild.members 查找 userId=${id}`);
+      }
+      
+      // 如果 guild.members 查找失败，尝试从 users.cache 获取（但不 fetch）
+      if (!user) {
+        const userManager: any = (this.client as any)?.users;
+        user = userManager?.cache?.get?.(id);
+        if (user) {
+          this.logger.info(`[ACTIVE_BLOCKS] ✅ 从 users.cache 找到用户 userId=${id}`);
+        }
       }
       
       if (!user) {
-        this.logger.info(`activeBlocks: failed to get user object for id=${id}`);
+        this.logger.info(`[ACTIVE_BLOCKS] ❌ 无法获取用户对象 userId=${id} (已尝试 guild.members 和 users.cache)`);
         return null;
       }
       
       const username = user.globalName || user.username || user.tag;
-      this.logger.info(`activeBlocks: user object found, globalName=${user.globalName || "none"}, username=${user.username || "none"}, tag=${user.tag || "none"}`);
+      this.logger.info(`[ACTIVE_BLOCKS] ✅ 用户对象获取成功 userId=${id} globalName=${user.globalName || "none"} username=${user.username || "none"} tag=${user.tag || "none"} 最终使用=${username}`);
       
       let avatarUrl: string | undefined;
       if (typeof user.displayAvatarURL === "function") {
         avatarUrl = user.displayAvatarURL({ size: 128, format: "png" });
-        this.logger.info(`activeBlocks: avatar from displayAvatarURL: ${avatarUrl || "none"}`);
       } else if (typeof user.avatarURL === "function") {
         avatarUrl = user.avatarURL({ size: 128, format: "png" });
-        this.logger.info(`activeBlocks: avatar from avatarURL: ${avatarUrl || "none"}`);
-      } else {
-        this.logger.info(`activeBlocks: no avatar URL method available on user object`);
       }
       
       const profile = { username, avatarUrl };
       this.personaProfileCache.set(id, profile);
       this.logger.info(
-        `activeBlocks: persona profile resolved successfully id=${id} username=${username} avatar=${avatarUrl || "none"}`
+        `[ACTIVE_BLOCKS] ✅ persona profile 解析完成 userId=${id} username=${username} avatar=${avatarUrl ? "已获取" : "无"}`
       );
       return profile;
     } catch (err) {
-      this.logger.info(`activeBlocks: exception while fetching user ${id}: ${String(err)}`);
-      this.logger.info(`activeBlocks: error stack: ${(err as any)?.stack || "no stack"}`);
+      this.logger.info(`[ACTIVE_BLOCKS] ❌ 查找用户时发生异常 userId=${id} error=${String(err)}`);
+      this.logger.info(`[ACTIVE_BLOCKS] error stack: ${(err as any)?.stack || "no stack"}`);
       return null;
     }
   }
@@ -941,8 +985,14 @@ export class Bot {
 
   private isFuzzyTokenMatch(token: string, keyword: string) {
     if (!token || !keyword) return false;
-    if (token.includes(keyword)) return true;
-    return this.levenshteinWithin(token, keyword, 1);
+    const t = token.toLowerCase();
+    const k = keyword.toLowerCase();
+    // 对于长度很短的关键词（如 "jd"、"db"），只允许完全匹配，避免与 "1D" 之类误匹配
+    if (k.length <= 2) {
+      return t === k;
+    }
+    if (t.includes(k)) return true;
+    return this.levenshteinWithin(t, k, 1);
   }
 
   private levenshteinWithin(a: string, b: string, limit: number) {
@@ -1034,29 +1084,45 @@ export class Bot {
       ];
     }
 
-    // 伪装作者为源作者（中文日志）
-    let username =
-      activeOverride?.username ||
-      (message.author as any)?.globalName ||
-      message.author.username ||
-      message.author.tag;
+    // 使用 persona 的头像和名字（如果 activeOverride 提供了的话）
+    let username: string | undefined = activeOverride?.username;
     let avatarUrl: string | undefined = activeOverride?.avatarUrl;
     
-    this.logger.info(`activeBlocks: processAndSend avatarUrl from activeOverride=${avatarUrl || "none"}, username=${username}`);
-    
-    try {
-      if (!avatarUrl) {
-        this.logger.info(`activeBlocks: avatarUrl not in activeOverride, falling back to source author`);
-      const anyAuthor = message.author as any;
-      if (typeof anyAuthor.displayAvatarURL === "function") {
-        avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
-      } else if (typeof anyAuthor.avatarURL === "function") {
-        avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
+    if (activeOverride) {
+      if (username) {
+        this.logger.info(`[ACTIVE_BLOCKS] ✅ 使用 persona 用户名: ${username}`);
+      } else {
+        this.logger.info(`[ACTIVE_BLOCKS] ⚠️ persona 用户名未获取到，将使用源作者名称`);
+        username = (message.author as any)?.globalName || message.author.username || message.author.tag;
       }
-        this.logger.info(`activeBlocks: fallback avatarUrl=${avatarUrl || "none"}`);
+      
+      if (avatarUrl) {
+        this.logger.info(`[ACTIVE_BLOCKS] ✅ 使用 persona 头像: ${avatarUrl.substring(0, 50)}...`);
+      } else {
+        this.logger.info(`[ACTIVE_BLOCKS] ⚠️ persona 头像未获取到，将使用源作者头像`);
+        try {
+          const anyAuthor = message.author as any;
+          if (typeof anyAuthor.displayAvatarURL === "function") {
+            avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
+          } else if (typeof anyAuthor.avatarURL === "function") {
+            avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
+          }
+          this.logger.info(`[ACTIVE_BLOCKS] 回退到源作者头像: ${avatarUrl || "none"}`);
+        } catch (err) {
+          this.logger.info(`[ACTIVE_BLOCKS] ❌ 获取源作者头像失败: ${String(err)}`);
+        }
       }
-    } catch (err) {
-      this.logger.info(`activeBlocks: error getting fallback avatar: ${String(err)}`);
+    } else {
+      // 非 activeBlocks 消息，使用源作者信息
+      username = (message.author as any)?.globalName || message.author.username || message.author.tag;
+      try {
+        const anyAuthor = message.author as any;
+        if (typeof anyAuthor.displayAvatarURL === "function") {
+          avatarUrl = anyAuthor.displayAvatarURL({ size: 128, format: "png" });
+        } else if (typeof anyAuthor.avatarURL === "function") {
+          avatarUrl = anyAuthor.avatarURL({ size: 128, format: "png" });
+        }
+      } catch { }
     }
 
     // 收集当前消息的附件（图片/视频标记用于 embed 图像）
