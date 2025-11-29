@@ -436,6 +436,11 @@ export class Bot {
     let pendingLabel: string | undefined;
     let i = 0;
 
+    // 主 persona 的频道显示（用于替换 “未知”）
+    const mainPersona = personaMatches[0];
+    const mainPersonaChannel =
+      mainPersona?.config.jumpChannelId ? `<#${mainPersona.config.jumpChannelId}>` : "";
+
     while (i < lines.length) {
       let trimmed = this.stripInvisible(lines[i]).trim();
       
@@ -535,8 +540,12 @@ export class Bot {
 
       // 其他情况：做行内替换，保持原行结构
       let processed = trimmed;
-      // 删除 "⁠未知" 和 "@用户名" 这样的内容
-      processed = processed.replace(/⁠未知/g, "");
+      // 将 "⁠未知" 替换为主 persona 频道（如果有），并删除 "@用户名" 以及 "#未知"
+      if (mainPersonaChannel) {
+        processed = processed.replace(/⁠未知/g, mainPersonaChannel);
+      } else {
+        processed = processed.replace(/⁠未知/g, "");
+      }
       processed = processed.replace(/@[A-Za-z0-9_]+/g, "");
       processed = processed.replace(/⁠#未知/g, "");
       // 去掉整行包裹的 * 或 **（Markdown 粗体/斜体标记）
@@ -553,6 +562,8 @@ export class Bot {
       processed = processed.replace(/\bAVG:\s*/gi, "平均: ");
       processed = processed.replace(/\bBE\b/gi, "成本价");
       processed = processed.replace(/\s*PnL:.*$/i, "");
+      // 删除尾部多余的星号（例如末尾的 "**"）
+      processed = processed.replace(/\s*\*+\s*$/g, "");
       // 清理多余空格
       processed = processed.replace(/\s+/g, " ").trim();
       
@@ -579,7 +590,27 @@ export class Bot {
       }
     }
 
-    return cleaned.join("\n").trim();
+    // 细节优化：去掉“当前无可成交交易”和下一个“订单无效 ...”之间的空行
+    const finalLines: string[] = [];
+    for (let j = 0; j < cleaned.length; j++) {
+      const line = cleaned[j];
+      if (line === "") {
+        const prev = cleaned[j - 1];
+        const next = cleaned[j + 1];
+        if (
+          prev &&
+          next &&
+          prev.includes("当前无可成交交易") &&
+          next.startsWith("订单无效 (策略执行中 & 止损设在入场价)")
+        ) {
+          // 跳过这一行空行
+          continue;
+        }
+      }
+      finalLines.push(line);
+    }
+
+    return finalLines.join("\n").trim();
   }
 
   private translateActiveHeading(line: string): string | null {
