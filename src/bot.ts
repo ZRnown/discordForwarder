@@ -146,6 +146,7 @@ export class Bot {
         if (!resolved?.channelId) return;
 
         const active = this.resolveActiveCategory(resolved.channelId);
+        // alerts 是发送新信息的，不是更新的，所以只处理 spot 和 futures 的编辑消息
         if (!active || (active.key !== "spot" && active.key !== "futures")) return;
 
         // 先调用 applyActiveOverrides 检查内容是否与上次相同
@@ -221,7 +222,12 @@ export class Bot {
 
     // 很多 activeBlocks 消息（特别是 futures/spot）主要内容在 embed.description 里，
     // 如果 originalText 为空，则回退到 embed 文本作为翻译与 persona 匹配的输入。
+    // 对于 alerts，需要确保 message.content 也被包含，因为 role mention 可能在 message.content 中
     let effectiveText = originalText;
+    // 对于 alerts，合并 message.content 和 originalText，确保 role mention 能被匹配到
+    if (activeMatch.key === "alerts" && message.content) {
+      effectiveText = `${message.content}\n${originalText}`.trim();
+    }
     if (!effectiveText?.trim()) {
       const embedParts: string[] = [];
       try {
@@ -234,6 +240,7 @@ export class Bot {
     }
 
     if (!effectiveText?.trim()) {
+      this.logger.info(`activeBlocks: applyActiveOverrides effectiveText is empty for category=${activeMatch.key} channelId=${message.channelId} messageId=${message.id} originalText.length=${originalText.length} hasEmbeds=${message.embeds.length}`);
       return null;
     }
 
@@ -245,11 +252,27 @@ export class Bot {
     const personas = this.resolvePersonasForBlock();
     const matchStrategy = activeMatch.config.matchStrategy ?? "auto";
     let personaMatches = this.matchActivePersonas(message, effectiveText, personas, matchStrategy);
-    if (personaMatches.length === 0 && personas.length > 0) {
-      personaMatches = [{ config: personas[0] }];
+    
+    // 对于 alerts，如果没有匹配到 persona，记录日志并返回 null（不要使用默认 persona）
+    if (personaMatches.length === 0) {
+      this.logger.info(`activeBlocks: no persona matched for category=${activeMatch.key} channelId=${message.channelId} messageId=${message.id} matchStrategy=${matchStrategy} messageContent="${(message.content || "").substring(0, 200)}" effectiveText="${effectiveText.substring(0, 200)}"`);
+      // 对于 alerts，如果没有匹配到 persona，不发送消息
+      if (activeMatch.key === "alerts") {
+        return null;
+      }
+      // 对于其他类别，使用第一个 persona 作为 fallback
+      if (personas.length > 0) {
+        personaMatches = [{ config: personas[0] }];
+        this.logger.info(`activeBlocks: using fallback persona=${personas[0].keyword || personas[0].userId} for category=${activeMatch.key}`);
+      }
+    } else {
+      this.logger.info(`activeBlocks: matched ${personaMatches.length} persona(s) for category=${activeMatch.key} personas=${personaMatches.map(p => p.config.keyword || p.config.userId).join(",")}`);
     }
     const translated = await this.buildActiveContent(activeMatch.key, effectiveText, personaMatches);
-    if (!translated) return null;
+    if (!translated) {
+      this.logger.info(`activeBlocks: buildActiveContent returned null for category=${activeMatch.key} channelId=${message.channelId} messageId=${message.id} effectiveText.length=${effectiveText.length}`);
+      return null;
+    }
 
     // 在输出日志之前，先检查内容是否与上次相同
     const lastSent = this.activeLastSent.get(message.id);
@@ -433,10 +456,14 @@ export class Bot {
       // 3. 角色匹配
       if (!matched && checkRole && persona.identityRoleId) {
         const roleId = String(persona.identityRoleId);
+        // 检查 message.content 和 originalText 中是否包含 <@&roleId>
+        const hasRoleInContent = (message.content || "").includes(`<@&${roleId}>`);
+        const hasRoleInText = (originalText || "").includes(`<@&${roleId}>`);
         matched =
           Boolean(message.mentions?.roles?.get(roleId)) ||
           Boolean((message as any).member?.roles?.cache?.has?.(roleId)) ||
-          (message.content || "").includes(`<@&${roleId}>`);
+          hasRoleInContent ||
+          hasRoleInText;
       }
 
       // 4. userId 匹配（始终允许，作为最后兜底）
@@ -477,10 +504,17 @@ export class Bot {
   ): Promise<string | null> {
     const normalizedRaw = this.insertHeadingBoundaries(rawText);
     const stripped = this.stripPersonaMarkers(normalizedRaw, personaMatches);
-    if (!stripped.trim()) return null;
+    if (!stripped.trim()) {
+      this.logger.info(`activeBlocks: buildActiveContent stripped is empty for category=${category} rawText.length=${rawText.length} normalizedRaw.length=${normalizedRaw.length}`);
+      return null;
+    }
 
     // 所有类别都使用统一的格式化逻辑
     const body = this.formatStructuredActiveBlock(stripped, personaMatches);
+    if (!body || !body.trim()) {
+      this.logger.info(`activeBlocks: buildActiveContent formatStructuredActiveBlock returned empty for category=${category} stripped.length=${stripped.length}`);
+      return null;
+    }
     return body;
   }
 
@@ -879,7 +913,11 @@ export class Bot {
       }
     }
     
-    if (!match || !typeLabel || !symbol || !action) return null;
+    if (!match || !typeLabel || !symbol || !action) {
+      // 对于 alerts 类别，如果 translateStoppedLine 返回 null，记录日志以便诊断
+      this.logger.info(`activeBlocks: translateStoppedLine no match for line="${line.substring(0, 100)}"`);
+      return null;
+    }
     
     // 清理 action：去掉 @用户 和 <@&roleId> 等 mention
     action = action.replace(/\s*@\w+\s*/g, "").replace(/\s*<@&\d+>\s*/g, "").trim();
