@@ -842,25 +842,46 @@ export class Bot {
   }
 
   private translateStoppedLine(line: string, personaMatches: PersonaMatch[]): string[] | null {
-    // 匹配 alerts 消息格式：<:Type:数字> **SYMBOL** https://...: ACTION <@&roleId>
-    // 或 :Type: **SYMBOL** https://...: ACTION <@&roleId>
-    // 使用更精确的正则表达式
-    const alertPattern = /^(<:(\w+):\d+>|:(\w+):)\s*\*\*([^*]+)\*\*\s*https:\/\/discord\.com\/channels\/\d+\/\d+\/\d+:?\s*(.+?)(?:\s*<@&\d+>)?\s*$/i;
-    let match = line.match(alertPattern);
+    // 匹配 alerts 消息格式：
+    // 1. <:Type:数字> **SYMBOL** https://...: ACTION <@&roleId>
+    // 2. :Type: **SYMBOL** https://...: ACTION <@&roleId>
+    // 3. :Type~数字: SYMBOL: ACTION @用户
+    let match: RegExpMatchArray | null = null;
+    let rawPrefix = "";
+    let typeLabel = "";
+    let symbol = "";
+    let action = "";
+
+    // 尝试匹配格式 1 和 2（带 Discord 链接）
+    const alertPattern1 = /^(<:(\w+):\d+>|:(\w+):)\s*\*\*([^*]+)\*\*\s*https:\/\/discord\.com\/channels\/\d+\/\d+\/\d+:?\s*(.+?)(?:\s*<@&\d+>)?\s*$/i;
+    match = line.match(alertPattern1);
     
     if (!match) {
       // 尝试更宽松的匹配，允许 action 后面有其他内容
       match = line.match(/^(<:(\w+):\d+>|:(\w+):)\s*\*\*([^*]+)\*\*\s*https:\/\/discord\.com\/channels\/\d+\/\d+\/\d+:?\s*(.+?)(?:\s*<@&\d+>)?/i);
     }
     
-    if (!match) return null;
-
-    const rawPrefix = match[1] || "";               // 原始前缀，可能是 <:Short:id> 或 :Short:
-    const typeLabel = match[2] || match[3] || "";   // 解析出的类型名 Short/Long/Spot
-    const symbol = match[4]?.trim() || "";
-    const action = match[5]?.trim() || "";
-
-    if (!typeLabel || !symbol || !action) return null;
+    if (match) {
+      rawPrefix = match[1] || "";
+      typeLabel = match[2] || match[3] || "";
+      symbol = match[4]?.trim() || "";
+      action = match[5]?.trim() || "";
+    } else {
+      // 尝试匹配格式 3：:Type~数字: SYMBOL: ACTION @用户
+      const alertPattern2 = /^(:(\w+)~\d+:)\s*([^:]+?):\s*(.+?)(?:\s*@\w+)?\s*$/i;
+      match = line.match(alertPattern2);
+      if (match) {
+        rawPrefix = match[1] || "";
+        typeLabel = match[2] || "";
+        symbol = match[3]?.trim() || "";
+        action = match[4]?.trim() || "";
+      }
+    }
+    
+    if (!match || !typeLabel || !symbol || !action) return null;
+    
+    // 清理 action：去掉 @用户 和 <@&roleId> 等 mention
+    action = action.replace(/\s*@\w+\s*/g, "").replace(/\s*<@&\d+>\s*/g, "").trim();
     
     this.logger.info(`activeBlocks: translateStoppedLine matched type=${typeLabel} symbol=${symbol} action=${action}`);
 
@@ -868,10 +889,11 @@ export class Bot {
     const normalizedAction = action.toLowerCase().trim();
     let translatedAction = ALERT_ACTION_MAP[normalizedAction];
     if (!translatedAction) {
-      // 处理 "Stops moved to [number]" 的情况
+      // 处理 "Stops moved to [number]" 或 "Stops moved to BE" 的情况
       const stopsMovedMatch = normalizedAction.match(/^stops?\s+moved\s+to\s+(.+)$/i);
       if (stopsMovedMatch) {
         const target = stopsMovedMatch[1].trim();
+        // 确保 "BE" 被正确翻译为 "保本价"（不区分大小写）
         if (target.toLowerCase() === "be") {
           translatedAction = "止损移至保本价";
         } else {
