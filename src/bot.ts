@@ -56,6 +56,7 @@ const ALERT_ACTION_MAP: Record<string, string> = {
   "closed be": "保本止损被触发",
   "stopped out": "止损平仓",
   "limit order filled": "限价订单已成交",
+  "limit order cancelled": "限价订单已取消",
   "updated stoploss, average entry, entry levels": "止损位已更新, 平均入场价, 分批入场点位"
 };
 
