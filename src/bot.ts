@@ -929,7 +929,8 @@ export class Bot {
     let translatedAction = ALERT_ACTION_MAP[normalizedAction];
     if (!translatedAction) {
       // 处理 "TP[数字] hit" 的情况（如 "TP1 hit", "TP2 hit", "TP3 hit"）
-      const tpHitMatch = normalizedAction.match(/^tp(\d+)\s+hit$/i);
+      // 使用更宽松的正则，允许 "hit" 前后有空格或其他字符
+      const tpHitMatch = normalizedAction.match(/^tp(\d+).*hit/i);
       if (tpHitMatch) {
         const tpNumber = tpHitMatch[1];
         const tpNumberMap: Record<string, string> = {
@@ -946,28 +947,50 @@ export class Bot {
         };
         const tpNumberText = tpNumberMap[tpNumber] || `第${tpNumber}`;
         translatedAction = `${tpNumberText}止盈已触发`;
+        this.logger.info(`activeBlocks: translateStoppedLine matched TP${tpNumber} hit -> ${translatedAction}`);
       } else {
-        // 处理 "Stops moved to [number]" 或 "Stops moved to BE" 的情况
-        const stopsMovedMatch = normalizedAction.match(/^stops?\s+moved\s+to\s+(.+)$/i);
-        if (stopsMovedMatch) {
-          const target = stopsMovedMatch[1].trim();
-          // 确保 "BE" 被正确翻译为 "保本价"（不区分大小写）
-          if (target.toLowerCase() === "be") {
-            translatedAction = "止损移至保本价";
-          } else {
-            translatedAction = `止损移至 ${target}`;
-          }
+        // 处理单独的 "TP[数字]" 的情况（如 "TP1", "TP2", "TP3"），翻译为 "到达第X目标"
+        const tpMatch = normalizedAction.match(/^tp(\d+)$/i);
+        if (tpMatch) {
+          const tpNumber = tpMatch[1];
+          const tpNumberMap: Record<string, string> = {
+            "1": "第一",
+            "2": "第二",
+            "3": "第三",
+            "4": "第四",
+            "5": "第五",
+            "6": "第六",
+            "7": "第七",
+            "8": "第八",
+            "9": "第九",
+            "10": "第十"
+          };
+          const tpNumberText = tpNumberMap[tpNumber] || `第${tpNumber}`;
+          translatedAction = `到达${tpNumberText}目标`;
+          this.logger.info(`activeBlocks: translateStoppedLine matched TP${tpNumber} -> ${translatedAction}`);
         } else {
-          // 尝试部分匹配
-          for (const [key, value] of Object.entries(ALERT_ACTION_MAP)) {
-            if (normalizedAction.includes(key)) {
-              translatedAction = value;
-              break;
+          // 处理 "Stops moved to [number]" 或 "Stops moved to BE" 的情况
+          const stopsMovedMatch = normalizedAction.match(/^stops?\s+moved\s+to\s+(.+)$/i);
+          if (stopsMovedMatch) {
+            const target = stopsMovedMatch[1].trim();
+            // 确保 "BE" 被正确翻译为 "保本价"（不区分大小写）
+            if (target.toLowerCase() === "be") {
+              translatedAction = "止损移至保本价";
+            } else {
+              translatedAction = `止损移至 ${target}`;
             }
-          }
-          // 如果还是找不到，使用原始 action
-          if (!translatedAction) {
-            translatedAction = action;
+          } else {
+            // 尝试部分匹配
+            for (const [key, value] of Object.entries(ALERT_ACTION_MAP)) {
+              if (normalizedAction.includes(key)) {
+                translatedAction = value;
+                break;
+              }
+            }
+            // 如果还是找不到，使用原始 action
+            if (!translatedAction) {
+              translatedAction = action;
+            }
           }
         }
       }
