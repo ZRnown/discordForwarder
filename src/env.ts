@@ -6,6 +6,16 @@ export interface Env {
   TRANSLATION_ENABLED?: string; // "true" | "false" (default true)
   DEEPSEEK_API_KEY?: string;
   DEEPSEEK_API_URL?: string; // default https://api.deepseek.com/v1/chat/completions
+  TOKEN_CHECK_INTERVAL_MINUTES?: string; // default 60
+  // Email notification configs
+  EMAIL_ENABLED?: string; // "true" | "false" (default false)
+  EMAIL_SMTP_HOST?: string;
+  EMAIL_SMTP_PORT?: string;
+  EMAIL_SMTP_SECURE?: string; // "true" | "false" (default true for port 465)
+  EMAIL_SMTP_USER?: string;
+  EMAIL_SMTP_PASS?: string;
+  EMAIL_FROM?: string;
+  EMAIL_TO?: string;
 }
 
 export function getEnv(): Env {

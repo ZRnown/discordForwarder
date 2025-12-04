@@ -1,0 +1,16 @@
+node_modules
+src
+*.ts
+*.tsx
+tsconfig.json
+eslint.config.js
+.prettierrc*
+.git
+.gitignore
+*.md
+logs
+*.log
+.env
+dist/*.map
+dist/*.d.ts
+

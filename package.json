@@ -3,10 +3,24 @@
   "version": "2.4.0",
   "description": "Selfbot that forwards your Discord messages to Telegram",
   "main": "dist/index.js",
+  "bin": {
+    "forwarding-discord-telegram": "dist/index.js"
+  },
   "scripts": {
     "start": "node .",
     "build": "tsc",
+    "build:cjs": "tsc -p tsconfig.pkg.json && find dist-cjs -name '*.js' -exec sh -c 'mv \"$1\" \"${1%.js}.cjs\"' _ {} \\; && find dist-cjs -name '*.cjs' -exec sed -i.bak \"s/\\\\.js\\\"/\\\\.cjs\\\"/g\" {} \\; && find dist-cjs -name '*.bak' -delete",
+    "build:cjs:pkg": "pnpm run build:cjs && find dist-cjs -name '*.cjs' -exec sh -c 'cp \"$1\" \"${1%.cjs}.js\" && sed -i.bak \"s/\\\\.cjs\\\"/\\\\.js\\\"/g\" \"${1%.cjs}.js\" && rm \"${1%.cjs}.js.bak\"' _ {} \\;",
     "build:watch": "tsc --watch",
+    "pkg": "pnpm run build:cjs && pkg package.pkg.json --public --public-packages \"*\" --no-bytecode --no-native-build --output bin/forwarding-discord-telegram",
+    "pkg:linux": "pnpm run build:cjs:pkg && pkg dist-cjs/index.js --targets node18-linux-x64 --public --public-packages \"*\" --no-bytecode --no-native-build --config package.pkg.json --output bin/forwarding-discord-telegram-linux",
+    "pkg:macos": "pnpm run build:cjs:pkg && pkg dist-cjs/index.js --targets node18-macos-x64 --public --public-packages \"*\" --no-bytecode --no-native-build --config package.pkg.json --output bin/forwarding-discord-telegram-macos",
+    "pkg:win": "pnpm run build:cjs:pkg && pkg dist-cjs/index.js --targets node18-win-x64 --public --public-packages \"*\" --no-bytecode --no-native-build --config package.pkg.json --output bin/forwarding-discord-telegram-win.exe",
+    "pkg:all": "pnpm run build:cjs && pkg package.pkg.json --targets node18-linux-x64,node18-macos-x64,node18-win-x64 --public --public-packages \"*\" --no-bytecode --no-native-build --output bin/forwarding-discord-telegram",
+    "docker:build": "docker build -t discord-forwarder .",
+    "docker:run": "docker-compose up -d",
+    "docker:stop": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
     "format": "prettier . --check --ignore-path .gitignore",
     "format:fix": "prettier . --write --ignore-path .gitignore",
     "lint": "eslint .",
@@ -27,11 +41,12 @@
     "url": "https://tapni.su"
   },
   "dependencies": {
+    "better-sqlite3": "^11.6.0",
     "discord-webhook-node": "^1.1.8",
     "discord.js": "^14.23.2",
     "discord.js-selfbot-v13": "^3.7.1",
     "dotenv": "^16.6.1",
-    "prettier": "^3.6.2",
+    "nodemailer": "^6.9.8",
     "proxy-agent": "^6.5.0"
   },
   "devDependencies": {
@@ -42,6 +57,9 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
     "globals": "^16.4.0",
+    "nexe": "^4.0.0-rc.1",
+    "pkg": "^5.8.1",
+    "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.0"
   },
@@ -50,5 +68,25 @@
   },
   "license": "MIT",
   "type": "module",
-  "packageManager": "pnpm@10.4.1+sha512.c753b6c3ad7afa13af388fa6d808035a008e30ea9993f58c6663e2bc5ff21679aa834db094987129aa4d488b86df57f7b634981b2f827cdcacc698cc0cfb88af"
+  "packageManager": "pnpm@10.4.1+sha512.c753b6c3ad7afa13af388fa6d808035a008e30ea9993f58c6663e2bc5ff21679aa834db094987129aa4d488b86df57f7b634981b2f827cdcacc698cc0cfb88af",
+  "pkg": {
+    "scripts": [
+      "dist/index.js"
+    ],
+    "assets": [
+      "config.json",
+      "package.json"
+    ],
+    "targets": [
+      "node18-linux-x64",
+      "node18-macos-x64",
+      "node18-win-x64"
+    ],
+    "outputPath": "bin"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "pkg": "patches/pkg.patch"
+    }
+  }
 }

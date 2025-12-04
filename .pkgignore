@@ -1,0 +1,27 @@
+# 排除配置文件，这些文件需要在运行时读取
+config.json
+.env
+.env.*
+
+# 排除日志文件
+logs/
+*.log
+
+# 排除源代码
+src/
+*.ts
+*.tsx
+
+# 排除开发文件
+node_modules/
+.git/
+.gitignore
+*.md
+tsconfig.json
+eslint.config.js
+.prettierrc*
+
+# 排除其他不需要的文件
+dist/*.map
+dist/*.d.ts
+

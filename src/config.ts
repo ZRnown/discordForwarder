@@ -1,6 +1,5 @@
 import { readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
-import prettier from "prettier";
 
 export type ChannelId = number | string;
 export type ChatId = ChannelId;
@@ -95,9 +94,8 @@ export async function getConfig(): Promise<Config> {
       activePersonas: {}
     } satisfies Config);
 
-    const formattedDefaultConfig = await prettier.format(defaultConfig, {
-      parser: "json"
-    });
+    // Simple JSON formatting (2 spaces indent)
+    const formattedDefaultConfig = JSON.stringify(JSON.parse(defaultConfig), null, 2) + "\n";
 
     await writeFile("./config.json", formattedDefaultConfig);
   }
