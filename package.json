@@ -17,14 +17,8 @@
     "pkg:macos": "pnpm run build:cjs:pkg && pkg dist-cjs/index.js --targets node18-macos-x64 --public --public-packages \"*\" --no-bytecode --no-native-build --config package.pkg.json --output bin/forwarding-discord-telegram-macos",
     "pkg:win": "pnpm run build:cjs:pkg && pkg dist-cjs/index.js --targets node18-win-x64 --public --public-packages \"*\" --no-bytecode --no-native-build --config package.pkg.json --output bin/forwarding-discord-telegram-win.exe",
     "pkg:all": "pnpm run build:cjs && pkg package.pkg.json --targets node18-linux-x64,node18-macos-x64,node18-win-x64 --public --public-packages \"*\" --no-bytecode --no-native-build --output bin/forwarding-discord-telegram",
-    "docker:build": "docker build -t discord-forwarder .",
-    "docker:run": "docker-compose up -d",
-    "docker:stop": "docker-compose down",
-    "docker:logs": "docker-compose logs -f",
     "format": "prettier . --check --ignore-path .gitignore",
-    "format:fix": "prettier . --write --ignore-path .gitignore",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "format:fix": "prettier . --write --ignore-path .gitignore"
   },
   "keywords": [
     "bot",
@@ -41,27 +35,20 @@
     "url": "https://tapni.su"
   },
   "dependencies": {
-    "better-sqlite3": "^11.6.0",
     "discord-webhook-node": "^1.1.8",
     "discord.js": "^14.23.2",
     "discord.js-selfbot-v13": "^3.7.1",
     "dotenv": "^16.6.1",
     "nodemailer": "^6.9.8",
-    "proxy-agent": "^6.5.0"
+    "proxy-agent": "^6.5.0",
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
-    "@eslint/compat": "^1.4.0",
-    "@eslint/js": "^9.37.0",
     "@types/node": "^20.19.20",
-    "eslint": "^9.37.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.4",
-    "globals": "^16.4.0",
-    "nexe": "^4.0.0-rc.1",
+    "@types/nodemailer": "^7.0.4",
     "pkg": "^5.8.1",
     "prettier": "^3.6.2",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.46.0"
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -74,7 +61,6 @@
       "dist/index.js"
     ],
     "assets": [
-      "config.json",
       "package.json"
     ],
     "targets": [
@@ -83,10 +69,5 @@
       "node18-win-x64"
     ],
     "outputPath": "bin"
-  },
-  "pnpm": {
-    "patchedDependencies": {
-      "pkg": "patches/pkg.patch"
-    }
   }
 }

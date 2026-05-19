@@ -36,7 +36,8 @@ export class EmailService {
     }
 
     const port = parseInt(EMAIL_SMTP_PORT || "465", 10);
-    const secure = EMAIL_SMTP_SECURE !== "false" && (port === 465 || port === 587);
+    const secure =
+      EMAIL_SMTP_SECURE !== "false" && (port === 465 || port === 587);
 
     this.transporter = nodemailer.createTransport({
       host: EMAIL_SMTP_HOST,
@@ -72,7 +73,8 @@ export class EmailService {
         text: options.text,
         html: options.html || options.text.replace(/\n/g, "<br>")
       });
-      console.log(`[Email] Email sent successfully to ${to}`);
+      if (process.env.LOG_LEVEL !== "error")
+        console.log(`[Email] Email sent successfully to ${to}`);
       return true;
     } catch (error) {
       console.error("[Email] Failed to send email:", error);
@@ -85,4 +87,3 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
   const service = new EmailService();
   return await service.send(options);
 }
-

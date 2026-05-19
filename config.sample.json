@@ -1,47 +1,73 @@
 {
   "channelWebhooks": {
-    "其他普通源频道ID": "https://discord.com/api/webhooks/xxx/yyy"
+    "SOURCE_CHANNEL_ID": "https://discord.com/api/webhooks/xxx/yyy",
+    "SOURCE_CHANNEL_WITH_OVERRIDE": {
+      "url": "https://discord.com/api/webhooks/override/yyy",
+      "remark": "Trading Alerts",
+      "displayName": "Trading Relay",
+      "avatarUrl": "https://example.com/avatar.png",
+      "emojiMap": {
+        "123456789012345678": "223456789012345678",
+        ":sss:": "323456789012345678",
+        "<a:rocket:423456789012345678>": {
+          "id": "523456789012345678",
+          "name": "rocket",
+          "animated": true
+        }
+      }
+    },
+    "SOURCE_CHANNEL_FANOUT": [
+      "https://discord.com/api/webhooks/primary/yyy",
+      {
+        "url": "https://discord.com/api/webhooks/backup/yyy",
+        "remark": "Backup",
+        "displayName": "Backup Relay",
+        "avatarUrl": "https://example.com/avatar-backup.png",
+        "emojiMap": {
+          "123456789012345678": "623456789012345678"
+        }
+      }
+    ]
+  },
+  "replacementsDictionary": {
+    "@everyone": "@ everyone"
   },
   "logging": {
-    "keepDays": 7
+    "keepDays": 1,
+    "filterPattern": "ACTIVE_BLOCKS|REPLY|EMOJI_REPLACE"
   },
   "activePersonas": {
     "muzzagin": {
-      "userId": "1234567890",
-      "identityRoleId": "9876543210",
-      "jumpChannelId": "1407314815541575732",
+      "userId": "123456789012345678",
+      "identityRoleId": "223456789012345678",
+      "jumpChannelId": "323456789012345678",
+      "jumpGuildId": "423456789012345678",
+      "sourceChannelId": "523456789012345678",
       "keyword": "muzzagin",
-      "channelButtonLabel": "🍑𝑴𝒖𝒛𝒛𝒂𝒈𝒊n"
+      "channelButtonLabel": "查看 Muzzagin 频道"
     },
     "jdrip": {
-      "userId": "2345678901",
-      "identityRoleId": "1098765432",
-      "jumpChannelId": "1407314815541575732",
+      "userId": "623456789012345678",
+      "identityRoleId": "723456789012345678",
+      "jumpChannelId": "823456789012345678",
       "keyword": "jdrip",
-      "channelButtonLabel": "🎱𝑱𝒅𝒓𝒊𝒑"
-    },
-    "alerts_owner": {
-      "userId": "3456789012",
-      "identityRoleId": "2109876543",
-      "jumpChannelId": "1407314815541575732",
-      "keyword": "alerts_owner",
-      "channelButtonLabel": "提醒频道"
+      "channelButtonLabel": "查看 Jdrip 频道"
     }
   },
   "activeBlocks": {
     "spot": {
-      "sourceChannelId": "源频道IDA",
-      "targetWebhook": "https://discord.com/api/webhooks/spot-target/xxxx",
+      "sourceChannelId": "923456789012345678",
+      "targetWebhook": "https://discord.com/api/webhooks/spot/yyy",
       "matchStrategy": "keyword"
     },
     "futures": {
-      "sourceChannelId": "源频道IDC",
-      "targetWebhook": "https://discord.com/api/webhooks/futures-target/yyyy",
-      "matchStrategy": "keyword"
+      "sourceChannelIds": ["103456789012345678", "113456789012345678"],
+      "targetWebhook": "https://discord.com/api/webhooks/futures/yyy",
+      "matchStrategy": "auto"
     },
     "alerts": {
-      "sourceChannelId": "源频道IDD",
-      "targetWebhook": "https://discord.com/api/webhooks/alerts-target/zzzz",
+      "sourceChannelId": "123456789012345679",
+      "targetWebhook": "https://discord.com/api/webhooks/alerts/yyy",
       "matchStrategy": "role"
     }
   }

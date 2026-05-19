@@ -18,14 +18,16 @@ export function isAllowedByConfig(
 
   return (
     // Guild check
-    isInAllowedIds(message.guildId, config.allowedGuildsIds) &&
-    isNotInMutedIds(message.guildId, config.mutedGuildsIds) &&
+    (!message.guildId ||
+      isInAllowedIds(message.guildId, config.allowedGuildsIds)) &&
+    (!message.guildId ||
+      isNotInMutedIds(message.guildId, config.mutedGuildsIds)) &&
     // Channel check
     isInAllowedIds(message.channelId, config.allowedChannelsIds) &&
     isNotInMutedIds(message.channelId, config.mutedChannelsIds) &&
     // Author check
-    isInAllowedIds(message.author.id, allowedUsers) &&
-    isNotInMutedIds(message.author.id, mutedUsers)
+    (!message.author || isInAllowedIds(message.author.id, allowedUsers)) &&
+    (!message.author || isNotInMutedIds(message.author.id, mutedUsers))
   );
 }
 
