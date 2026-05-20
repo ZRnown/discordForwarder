@@ -17,8 +17,41 @@ export interface ActiveTargetMessage {
   messageId: string;
 }
 
+export interface ActiveTargetScope {
+  webhookUrl?: string;
+  threadId?: string;
+  threadName?: string;
+  remark?: string;
+}
+
 export function buildActiveSlotSourceId(category: string, scopeKey: string) {
   return `active-slot:${category}:${scopeKey}`;
+}
+
+export function buildActiveSlotSourceIdsForScope(
+  category: string | undefined,
+  scope?: ActiveTargetScope
+) {
+  if (!category || !scope) {
+    return [];
+  }
+
+  const scopeKeys = [
+    scope.webhookUrl && scope.threadId
+      ? `webhook:${scope.webhookUrl}:thread:${scope.threadId}`
+      : undefined,
+    scope.webhookUrl && scope.threadName
+      ? `webhook:${scope.webhookUrl}:threadName:${scope.threadName}`
+      : undefined,
+    scope.webhookUrl && !scope.threadId && !scope.threadName && !scope.remark
+      ? `webhook:${scope.webhookUrl}`
+      : undefined,
+    scope.remark ? `remark:${scope.remark}` : undefined
+  ].filter((value): value is string => Boolean(value));
+
+  return [...new Set(scopeKeys)].map((scopeKey) =>
+    buildActiveSlotSourceId(category, scopeKey)
+  );
 }
 
 export function canEditActiveForwardItem(item: ActiveForwardItem): boolean {

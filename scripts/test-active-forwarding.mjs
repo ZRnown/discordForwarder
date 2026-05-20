@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   buildActiveSlotSourceId,
+  buildActiveSlotSourceIdsForScope,
   partitionActivePreparedMessagesForEdit
 } from "../dist/activeForwarding.js";
 
@@ -87,4 +88,32 @@ assert.equal(
     "webhook:https://example.com/hook:thread:1506590874589593620"
   ),
   "active-slot:futures:webhook:https://example.com/hook:thread:1506590874589593620"
+);
+
+const muzzaginSlotIds = buildActiveSlotSourceIdsForScope("futures", {
+  webhookUrl: "https://example.com/forum",
+  threadName: "muzzagin",
+  remark: "activeBlocks thread: muzzagin"
+});
+const woodsSlotIds = buildActiveSlotSourceIdsForScope("futures", {
+  webhookUrl: "https://example.com/forum",
+  threadName: "woods",
+  remark: "activeBlocks thread: woods"
+});
+
+assert.equal(
+  muzzaginSlotIds.includes(
+    "active-slot:futures:webhook:https://example.com/forum"
+  ),
+  false
+);
+assert.equal(
+  woodsSlotIds.includes(
+    "active-slot:futures:webhook:https://example.com/forum"
+  ),
+  false
+);
+assert.deepEqual(
+  muzzaginSlotIds.filter((slotId) => woodsSlotIds.includes(slotId)),
+  []
 );

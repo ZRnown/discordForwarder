@@ -20,6 +20,7 @@ import { SenderBot } from "./senderBot.js";
 import { getEnv } from "./env.js";
 import { FileLogger } from "./logger.js";
 import {
+  buildActiveSlotSourceIdsForScope,
   buildActiveSlotSourceId,
   partitionActivePreparedMessagesForEdit
 } from "./activeForwarding.js";
@@ -1375,23 +1376,14 @@ export class Bot {
     category: ActiveCategory | undefined,
     scope?: TargetScopeLike
   ): string | undefined {
-    const scopeKey = this.getTargetScopeKey(scope);
-    return category && scopeKey
-      ? buildActiveSlotSourceId(category, scopeKey)
-      : undefined;
+    return this.getActiveSlotSourceIds(category, scope)[0];
   }
 
   private getActiveSlotSourceIds(
     category: ActiveCategory | undefined,
     scope?: TargetScopeLike
   ): string[] {
-    if (!category) {
-      return [];
-    }
-
-    return this.getTargetScopeKeys(scope).map((scopeKey) =>
-      buildActiveSlotSourceId(category, scopeKey)
-    );
+    return buildActiveSlotSourceIdsForScope(category, scope);
   }
 
   private findTargetMessage(
