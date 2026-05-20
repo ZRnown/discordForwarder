@@ -1254,7 +1254,12 @@ export class Bot {
           threadScope
         )) {
           if (!this.findTargetMessage(slotSourceId, threadScope)) {
-            this.rememberTargetMessage(slotSourceId, target, threadScope);
+            this.rememberActiveSlotTargetMessage(
+              category,
+              slotSourceId,
+              target,
+              threadScope
+            );
             changed = true;
           }
         }
@@ -1427,15 +1432,25 @@ export class Bot {
     target: TargetMessageMapping,
     scope?: TargetScopeLike
   ) {
+    this.rememberTargetMessageForScopeKeys(
+      sourceMessageId,
+      target,
+      this.getTargetScopeKeys(scope)
+    );
+  }
+
+  private rememberTargetMessageForScopeKeys(
+    sourceMessageId: string,
+    target: TargetMessageMapping,
+    scopeKeys: string[]
+  ) {
     const current = this.sourceToTarget.get(sourceMessageId);
-    const scopeKey = this.getTargetScopeKey(scope);
     const next: StoredTargetMessageMapping = {
       channelId: target.channelId,
       messageId: target.messageId
     };
 
     const nextTargets = current?.targets ? { ...current.targets } : undefined;
-    const scopeKeys = this.getTargetScopeKeys(scope);
     if (scopeKeys.length > 0) {
       const scopedTargets = nextTargets ?? {};
       for (const key of scopeKeys) {
@@ -1450,6 +1465,25 @@ export class Bot {
     }
 
     this.sourceToTarget.set(sourceMessageId, next);
+  }
+
+  private rememberActiveSlotTargetMessage(
+    category: ActiveCategory | undefined,
+    slotSourceId: string,
+    target: TargetMessageMapping,
+    scope?: TargetScopeLike
+  ) {
+    if (!category) {
+      this.rememberTargetMessage(slotSourceId, target, scope);
+      return;
+    }
+
+    const prefix = `active-slot:${category}:`;
+    const scopeKeys = this.getActiveSlotSourceIds(category, scope).map(
+      (sourceId) =>
+        sourceId.startsWith(prefix) ? sourceId.slice(prefix.length) : sourceId
+    );
+    this.rememberTargetMessageForScopeKeys(slotSourceId, target, scopeKeys);
   }
 
   private forgetTargetMessage(
@@ -4095,7 +4129,8 @@ export class Bot {
                     activeCategory,
                     prepared.sender
                   )) {
-                    this.rememberTargetMessage(
+                    this.rememberActiveSlotTargetMessage(
+                      activeCategory,
                       slotSourceId,
                       {
                         channelId: String(first.targetChannelId),
