@@ -9,6 +9,7 @@ const webhookInfoCache = new Map<
   string,
   Promise<{ guild_id?: string; channel_id?: string }>
 >();
+const webhookThreadCreateQueues = new Map<string, Promise<void>>();
 
 export class SenderBot {
   // 保留以兼容旧接口，Webhook 模式不使用
@@ -842,9 +843,41 @@ export class SenderBot {
     body: Record<string, any>,
     wait = false
   ): Promise<any> {
+    if (this.threadName && !this.threadId) {
+      return await this.runWithThreadCreateLock(() =>
+        this.executeWebhookRequest("postToWebhook", () =>
+          this.postToWebhookOnce(body, wait)
+        )
+      );
+    }
+
     return await this.executeWebhookRequest("postToWebhook", () =>
       this.postToWebhookOnce(body, wait)
     );
+  }
+
+  private async runWithThreadCreateLock<T>(fn: () => Promise<T>): Promise<T> {
+    const key = this.getThreadStoreKey();
+    const previous = webhookThreadCreateQueues.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    webhookThreadCreateQueues.set(
+      key,
+      previous.then(() => current)
+    );
+
+    await previous;
+    try {
+      await this.loadStoredThreadId();
+      return await fn();
+    } finally {
+      release();
+      if (webhookThreadCreateQueues.get(key) === current) {
+        webhookThreadCreateQueues.delete(key);
+      }
+    }
   }
 
   private async postToWebhookOnce(
