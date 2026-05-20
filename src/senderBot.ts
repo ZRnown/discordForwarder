@@ -950,6 +950,7 @@ export class SenderBot {
   ): Promise<any> {
     try {
       const url = new URL(this.webhookUrl);
+      this.applyThreadParams(url);
       const path = `${url.pathname}/messages/${messageId}${url.search || ""}`;
       const options: https.RequestOptions = {
         method: "PATCH",

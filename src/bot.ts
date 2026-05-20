@@ -19,6 +19,10 @@ import { formatSize } from "./format.js";
 import { SenderBot } from "./senderBot.js";
 import { getEnv } from "./env.js";
 import { FileLogger } from "./logger.js";
+import {
+  buildActiveSlotSourceId,
+  partitionActivePreparedMessagesForEdit
+} from "./activeForwarding.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -1206,7 +1210,90 @@ export class Bot {
             Boolean(entry)
         );
       this.sourceToTarget = new Map(normalizedEntries);
+      await this.backfillActiveSlotMappings();
     } catch {}
+  }
+
+  private async backfillActiveSlotMappings() {
+    const threadStore = await this.loadWebhookThreadStore();
+    let changed = false;
+
+    for (const [threadStoreKey, threadId] of Object.entries(threadStore)) {
+      const [webhookId, ...threadNameParts] = threadStoreKey.split(":");
+      const threadName = threadNameParts.join(":");
+      if (!webhookId || !threadName || !threadId) {
+        continue;
+      }
+
+      const webhookUrl = this.findActiveThreadWebhookUrlById(webhookId);
+      if (!webhookUrl) {
+        continue;
+      }
+
+      for (const category of ["spot", "futures"] as const) {
+        const threadScope = {
+          webhookUrl,
+          threadId: String(threadId),
+          threadName,
+          remark: `activeBlocks thread: ${threadName}`
+        };
+        const target = this.findTargetMessage(
+          buildActiveSlotSourceId(
+            category,
+            `webhook:${webhookUrl}:thread:${threadId}`
+          ),
+          threadScope
+        );
+        if (!target) {
+          continue;
+        }
+
+        for (const slotSourceId of this.getActiveSlotSourceIds(
+          category,
+          threadScope
+        )) {
+          if (!this.findTargetMessage(slotSourceId, threadScope)) {
+            this.rememberTargetMessage(slotSourceId, target, threadScope);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    if (changed) {
+      await this.saveMapping();
+    }
+  }
+
+  private async loadWebhookThreadStore(): Promise<Record<string, string>> {
+    try {
+      const raw = await fs.readFile(
+        path.resolve(process.cwd(), ".data", "webhook_threads.json"),
+        "utf-8"
+      );
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private findActiveThreadWebhookUrlById(webhookId: string) {
+    for (const config of Object.values(this.config.activeBlocks ?? {})) {
+      const threadWebhook = config?.threadWebhook;
+      if (!threadWebhook) {
+        continue;
+      }
+      try {
+        const url = new URL(threadWebhook);
+        const parts = url.pathname.split("/").filter(Boolean);
+        const currentWebhookId = parts[parts.indexOf("webhooks") + 1];
+        if (currentWebhookId === webhookId) {
+          return threadWebhook;
+        }
+      } catch {}
+    }
+    return undefined;
   }
 
   private async saveMapping() {
@@ -1284,6 +1371,29 @@ export class Bot {
     return this.getTargetScopeKeys(scope)[0];
   }
 
+  private getActiveSlotSourceId(
+    category: ActiveCategory | undefined,
+    scope?: TargetScopeLike
+  ): string | undefined {
+    const scopeKey = this.getTargetScopeKey(scope);
+    return category && scopeKey
+      ? buildActiveSlotSourceId(category, scopeKey)
+      : undefined;
+  }
+
+  private getActiveSlotSourceIds(
+    category: ActiveCategory | undefined,
+    scope?: TargetScopeLike
+  ): string[] {
+    if (!category) {
+      return [];
+    }
+
+    return this.getTargetScopeKeys(scope).map((scopeKey) =>
+      buildActiveSlotSourceId(category, scopeKey)
+    );
+  }
+
   private findTargetMessage(
     sourceMessageId: string,
     scope?: TargetScopeLike
@@ -1333,12 +1443,15 @@ export class Bot {
     };
 
     const nextTargets = current?.targets ? { ...current.targets } : undefined;
-    if (scopeKey) {
+    const scopeKeys = this.getTargetScopeKeys(scope);
+    if (scopeKeys.length > 0) {
       const scopedTargets = nextTargets ?? {};
-      scopedTargets[scopeKey] = {
-        channelId: target.channelId,
-        messageId: target.messageId
-      };
+      for (const key of scopeKeys) {
+        scopedTargets[key] = {
+          channelId: target.channelId,
+          messageId: target.messageId
+        };
+      }
       next.targets = scopedTargets;
     } else if (nextTargets && Object.keys(nextTargets).length > 0) {
       next.targets = nextTargets;
@@ -3853,39 +3966,6 @@ export class Bot {
       );
 
       const primaryMessage = preparedMessages[0].item;
-      const singleMessageLimit = primaryMessage.useEmbed ? 4096 : 2000;
-      const existingTarget =
-        activeOverride &&
-        senders.length === 1 &&
-        (primaryMessage.uploads?.length || 0) === 0 &&
-        (primaryMessage.content || "").length <= singleMessageLimit
-          ? this.findTargetMessage(message.id, senders[0])
-          : undefined;
-
-      if (existingTarget) {
-        const editBody = senders[0].buildWebhookBody(primaryMessage, {
-          includeReplyReference: false
-        });
-        if (editBody) {
-          try {
-            await senders[0].editWebhookMessage(
-              existingTarget.messageId,
-              editBody
-            );
-            const activeCategory = this.resolveActiveCategory(
-              message.channelId
-            )?.key;
-            this.logger.info(
-              `[ACTIVE_BLOCKS] ✏️ 已编辑转发消息 category=${activeCategory || "unknown"} source=${message.id} -> target=${existingTarget.channelId}/${existingTarget.messageId}`
-            );
-            return;
-          } catch (editErr) {
-            this.logger.error(
-              `[ACTIVE_BLOCKS] 编辑已转发消息失败，回退为新发 category=${this.resolveActiveCategory(message.channelId)?.key || "unknown"} messageId=${message.id} error=${String(editErr)}`
-            );
-          }
-        }
-      }
 
       if (options?.preferExistingTargetEdit && !activeOverride) {
         const editedExisting = await this.tryEditExistingForwardedMessages(
@@ -3911,12 +3991,91 @@ export class Bot {
       }
 
       try {
+        let messagesToSend = preparedMessages;
+        const activeCategory = this.resolveActiveCategory(
+          message.channelId
+        )?.key;
+        if (activeOverride) {
+          const editPlan = partitionActivePreparedMessagesForEdit(
+            message.id,
+            preparedMessages,
+            (sourceMessageId, sender) => {
+              const exactTarget = this.findTargetMessage(
+                sourceMessageId,
+                sender
+              );
+              if (exactTarget) {
+                return exactTarget;
+              }
+              const activeSlotSourceIds = this.getActiveSlotSourceIds(
+                activeCategory,
+                sender
+              );
+              for (const activeSlotSourceId of activeSlotSourceIds) {
+                const slotTarget = this.findTargetMessage(
+                  activeSlotSourceId,
+                  sender
+                );
+                if (slotTarget) {
+                  return slotTarget;
+                }
+              }
+              return undefined;
+            }
+          );
+          messagesToSend = editPlan.sendable;
+
+          for (const { prepared, target } of editPlan.editable) {
+            const editBody = prepared.sender.buildWebhookBody(prepared.item, {
+              includeReplyReference: false
+            });
+            if (!editBody) {
+              messagesToSend.push(prepared);
+              continue;
+            }
+
+            try {
+              await prepared.sender.editWebhookMessage(
+                target.messageId,
+                editBody
+              );
+              const activeSlotSourceId = this.getActiveSlotSourceId(
+                activeCategory,
+                prepared.sender
+              );
+              if (activeSlotSourceId) {
+                this.rememberTargetMessage(
+                  message.id,
+                  {
+                    channelId: target.channelId,
+                    messageId: target.messageId
+                  },
+                  prepared.sender
+                );
+                await this.saveMapping();
+              }
+              this.logger.info(
+                `[ACTIVE_BLOCKS] ✏️ 已编辑转发消息 category=${activeCategory || "unknown"} source=${message.id} -> target=${target.channelId}/${target.messageId}`
+              );
+            } catch (editErr) {
+              this.logger.error(
+                `[ACTIVE_BLOCKS] 编辑已转发消息失败，回退为新发 category=${this.resolveActiveCategory(message.channelId)?.key || "unknown"} messageId=${message.id} target=${target.channelId}/${target.messageId} error=${String(editErr)}`
+              );
+              messagesToSend.push(prepared);
+            }
+          }
+
+          if (messagesToSend.length === 0) {
+            return;
+          }
+        }
+
         const resultsBySender: Array<{
           sender: SenderBot;
           item: typeof primaryMessage;
           results: Array<any>;
         }> = [];
-        for (const prepared of preparedMessages) {
+        for (const prepared of messagesToSend) {
           try {
             const results = await prepared.sender.sendData([prepared.item]);
             resultsBySender.push({
@@ -3935,10 +4094,26 @@ export class Bot {
                   },
                   prepared.sender
                 );
+                const activeSlotSourceId = this.getActiveSlotSourceId(
+                  activeCategory,
+                  prepared.sender
+                );
+                if (activeOverride && activeSlotSourceId) {
+                  for (const slotSourceId of this.getActiveSlotSourceIds(
+                    activeCategory,
+                    prepared.sender
+                  )) {
+                    this.rememberTargetMessage(
+                      slotSourceId,
+                      {
+                        channelId: String(first.targetChannelId),
+                        messageId: String(first.targetMessageId)
+                      },
+                      prepared.sender
+                    );
+                  }
+                }
                 await this.saveMapping();
-                const activeCategory = this.resolveActiveCategory(
-                  message.channelId
-                )?.key;
                 if (activeOverride) {
                   this.logger.info(
                     `[ACTIVE_BLOCKS] ✅ 成功发送 activeBlocks 消息！category=${activeCategory || "unknown"} source=${first.sourceMessageId} -> target=${first.targetChannelId}/${first.targetMessageId}`
