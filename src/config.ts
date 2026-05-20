@@ -25,6 +25,7 @@ export interface ActiveCategoryConfig {
   sourceChannelIds?: ChannelId[];
   sourceChannelId?: ChannelId;
   targetWebhook: string;
+  threadWebhook?: string;
   matchStrategy?: "keyword" | "role" | "auto" | "channel";
 }
 

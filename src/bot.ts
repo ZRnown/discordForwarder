@@ -29,6 +29,7 @@ interface RenderOutput {
 interface ActiveOverrideResult {
   content: string;
   senderBot?: SenderBot;
+  extraSenderBots?: SenderBot[];
   username?: string;
   avatarUrl?: string;
   useEmbed?: boolean;
@@ -53,6 +54,8 @@ interface TargetScopeLike {
   remark?: string;
   webhookUrl?: string;
   defaultChannelId?: string;
+  threadId?: string;
+  threadName?: string;
 }
 
 interface PendingSourceForwardState {
@@ -1262,6 +1265,12 @@ export class Bot {
     }
 
     const keys = [
+      scope.webhookUrl && scope.threadId
+        ? `webhook:${scope.webhookUrl}:thread:${scope.threadId}`
+        : undefined,
+      scope.webhookUrl && scope.threadName
+        ? `webhook:${scope.webhookUrl}:threadName:${scope.threadName}`
+        : undefined,
       scope.webhookUrl ? `webhook:${scope.webhookUrl}` : undefined,
       scope.defaultChannelId ? `channel:${scope.defaultChannelId}` : undefined,
       scope.remark ? `remark:${scope.remark}` : undefined,
@@ -1986,16 +1995,52 @@ export class Bot {
       message
     );
     const overrideButtons = personaButton ? [personaButton] : undefined;
+    const extraSenderBots = this.buildActiveThreadSenderBots(
+      activeMatch.config,
+      personaMatches
+    );
 
     return {
       content: finalContent,
       senderBot,
+      extraSenderBots,
       // 始终优先使用 userId 查到的用户名；若获取失败，则退回源作者名称
       username: personaProfile?.username,
       avatarUrl: personaProfile?.avatarUrl,
       useEmbed: true,
       components: overrideButtons
     };
+  }
+
+  private buildActiveThreadSenderBots(
+    config: ActiveCategoryConfig,
+    personaMatches: PersonaMatch[]
+  ) {
+    if (!config.threadWebhook) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const senders: SenderBot[] = [];
+    for (const match of personaMatches) {
+      const threadName = String(
+        match.config.keyword || match.config.userId || ""
+      ).trim();
+      if (!threadName || seen.has(threadName)) {
+        continue;
+      }
+      seen.add(threadName);
+      senders.push(
+        new SenderBot({
+          chatsToSend: [],
+          replacementsDictionary: this.config.replacementsDictionary,
+          webhookUrl: config.threadWebhook,
+          remark: `activeBlocks thread: ${threadName}`,
+          threadName
+        })
+      );
+    }
+    return senders;
   }
 
   private resolveActiveCategory(
@@ -3319,7 +3364,7 @@ export class Bot {
       }
 
       const senders = activeOverride?.senderBot
-        ? [activeOverride.senderBot]
+        ? [activeOverride.senderBot, ...(activeOverride.extraSenderBots ?? [])]
         : this.getSendersForChannel(message.channelId);
       if (!senders || senders.length === 0) {
         this.logger.debug(`跳过：未映射的源频道 channel=${message.channelId}`);
