@@ -1,7 +1,14 @@
 import https from "node:https";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { URL } from "node:url";
 
 import { ChannelId } from "./config.js";
+
+const webhookInfoCache = new Map<
+  string,
+  Promise<{ guild_id?: string; channel_id?: string }>
+>();
 
 export class SenderBot {
   // 保留以兼容旧接口，Webhook 模式不使用
@@ -20,6 +27,9 @@ export class SenderBot {
   remark?: string;
   displayName?: string;
   avatarUrl?: string;
+  threadId?: string;
+  threadName?: string;
+  private threadIdLoaded = false;
   private webhookRequestQueue: Promise<void> = Promise.resolve();
 
   constructor(options: {
@@ -30,6 +40,8 @@ export class SenderBot {
     remark?: string;
     displayName?: string;
     avatarUrl?: string;
+    threadId?: string;
+    threadName?: string;
     emojiMap?: Record<
       string,
       string | { id: string; name?: string; animated?: boolean }
@@ -43,6 +55,8 @@ export class SenderBot {
     this.remark = options.remark;
     this.displayName = options.displayName;
     this.avatarUrl = options.avatarUrl;
+    this.threadId = options.threadId;
+    this.threadName = options.threadName;
   }
 
   private rewriteOutgoingText(text: string): string {
@@ -304,6 +318,9 @@ export class SenderBot {
     wait = false
   ): Promise<any> {
     const url = new URL(this.webhookUrl);
+    await this.loadStoredThreadId();
+    this.applyThreadParams(url);
+    this.applyThreadBodyParam(body);
     if (wait) url.searchParams.set("wait", "true");
 
     const boundary = "----cascadeform" + Math.random().toString(16).slice(2);
@@ -444,7 +461,7 @@ export class SenderBot {
   async prepare() {
     // 读取 webhook 元信息，拿到 guild_id 与默认 channel_id（有些实现会返回）
     try {
-      const info = await this.getWebhookInfo();
+      const info = await this.getCachedWebhookInfo();
       this.webhookGuildId = info.guild_id;
       this.defaultChannelId = info.channel_id;
     } catch {
@@ -735,6 +752,7 @@ export class SenderBot {
           resp = await this.postToWebhook(payload, true);
         }
         if (resp?.id && resp?.channel_id) {
+          await this.rememberThreadId(String(resp.channel_id));
           results.push({
             sourceMessageId: i === 0 ? item.sourceMessageId : undefined,
             targetMessageId: String(resp.id),
@@ -834,6 +852,9 @@ export class SenderBot {
     wait = false
   ): Promise<any> {
     const url = new URL(this.webhookUrl);
+    await this.loadStoredThreadId();
+    this.applyThreadParams(url);
+    this.applyThreadBodyParam(body);
     if (wait) {
       // 让服务端返回消息对象
       url.searchParams.set("wait", "true");
@@ -1060,5 +1081,74 @@ export class SenderBot {
       req.on("error", (err) => reject(err));
       req.end();
     });
+  }
+
+  private async getCachedWebhookInfo(): Promise<{
+    guild_id?: string;
+    channel_id?: string;
+  }> {
+    let cached = webhookInfoCache.get(this.webhookUrl);
+    if (!cached) {
+      cached = this.getWebhookInfo();
+      webhookInfoCache.set(this.webhookUrl, cached);
+    }
+    return await cached;
+  }
+
+  private applyThreadParams(url: URL) {
+    if (this.threadId) {
+      url.searchParams.set("thread_id", this.threadId);
+    }
+  }
+
+  private applyThreadBodyParam(body: Record<string, any>) {
+    if (!this.threadId && this.threadName) {
+      body.thread_name = this.threadName;
+    }
+  }
+
+  private getThreadStorePath() {
+    return path.resolve(process.cwd(), ".data", "webhook_threads.json");
+  }
+
+  private getThreadStoreKey() {
+    const url = new URL(this.webhookUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const webhookId = parts[parts.indexOf("webhooks") + 1] || url.pathname;
+    return `${webhookId}:${this.threadName || ""}`;
+  }
+
+  private async readThreadStore(): Promise<Record<string, string>> {
+    try {
+      const raw = await readFile(this.getThreadStorePath(), "utf-8");
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private async loadStoredThreadId() {
+    if (this.threadId || !this.threadName || this.threadIdLoaded) {
+      return;
+    }
+    this.threadIdLoaded = true;
+    const store = await this.readThreadStore();
+    const stored = store[this.getThreadStoreKey()];
+    if (stored) {
+      this.threadId = String(stored);
+    }
+  }
+
+  private async rememberThreadId(channelId?: string) {
+    if (!channelId || !this.threadName || this.threadId) {
+      return;
+    }
+    this.threadId = String(channelId);
+    const storePath = this.getThreadStorePath();
+    const store = await this.readThreadStore();
+    store[this.getThreadStoreKey()] = this.threadId;
+    await mkdir(path.dirname(storePath), { recursive: true });
+    await writeFile(storePath, JSON.stringify(store, null, 2) + "\n", "utf-8");
   }
 }

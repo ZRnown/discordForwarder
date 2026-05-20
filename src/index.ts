@@ -124,6 +124,8 @@ async function bootstrap() {
             remark?: string;
             displayName?: string;
             avatarUrl?: string;
+            threadId?: string;
+            threadName?: string;
             emojiMap?: Record<
               string,
               string | { id: string; name?: string; animated?: boolean }
@@ -132,7 +134,11 @@ async function bootstrap() {
     ) => {
       const webhookUrl =
         typeof webhookEntry === "string" ? webhookEntry : webhookEntry.url;
-      let existing = senderBotsByWebhook.get(webhookUrl);
+      const senderKey =
+        typeof webhookEntry === "string"
+          ? webhookUrl
+          : `${webhookUrl}|threadId:${webhookEntry.threadId || ""}|threadName:${webhookEntry.threadName || ""}`;
+      let existing = senderBotsByWebhook.get(senderKey);
       if (existing) return existing;
       const sb = new SenderBot({
         chatsToSend: [],
@@ -146,10 +152,19 @@ async function bootstrap() {
             : undefined,
         avatarUrl:
           typeof webhookEntry === "object" ? webhookEntry.avatarUrl : undefined,
+        threadId:
+          typeof webhookEntry === "object" ? webhookEntry.threadId : undefined,
+        threadName:
+          typeof webhookEntry === "object"
+            ? webhookEntry.threadName
+            : undefined,
         emojiMap:
           typeof webhookEntry === "object" ? webhookEntry.emojiMap : undefined
       });
-      senderBotsByWebhook.set(webhookUrl, sb);
+      senderBotsByWebhook.set(senderKey, sb);
+      if (!senderBotsByWebhook.has(webhookUrl)) {
+        senderBotsByWebhook.set(webhookUrl, sb);
+      }
       prepares.push(sb.prepare());
       return sb;
     };

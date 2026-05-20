@@ -33,6 +33,8 @@ export interface WebhookEntry {
   remark?: string;
   displayName?: string;
   avatarUrl?: string;
+  threadId?: string;
+  threadName?: string;
   emojiMap?: Record<
     string,
     string | { id: string; name?: string; animated?: boolean }
