@@ -3985,7 +3985,7 @@ export class Bot {
           }
         }
 
-        if (targetInfos.length > 0) {
+        if (!activeOverride && targetInfos.length > 0) {
           // 构建按钮并拆分为每行最多 5 个
           const buttons = targetInfos.map((t) => ({
             type: 2,
