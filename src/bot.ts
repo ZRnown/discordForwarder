@@ -27,6 +27,7 @@ import {
 } from "./activeForwarding.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { rewriteClickableAliases } from "./clickableAliases.js";
 
 interface RenderOutput {
   content: string;
@@ -2359,6 +2360,7 @@ export class Bot {
 
     // 所有类别都使用统一的格式化逻辑
     const body = await this.formatStructuredActiveBlock(
+      category,
       stripped,
       personaMatches,
       targetScope
@@ -2446,6 +2448,7 @@ export class Bot {
   }
 
   private async formatStructuredActiveBlock(
+    category: ActiveCategory,
     raw: string,
     personaMatches: PersonaMatch[],
     targetScope?: TargetScopeLike
@@ -2744,11 +2747,51 @@ export class Bot {
       }
 
       finalLines.push(
-        this.rewriteDiscordSourceLinks(trimmedLine, personaMatches, targetScope)
+        this.rewriteClickableTextAliases(
+          category,
+          this.rewriteDiscordSourceLinks(
+            trimmedLine,
+            personaMatches,
+            targetScope
+          )
+        )
       );
     }
 
     return finalLines.join("\n").trim();
+  }
+
+  private rewriteClickableTextAliases(category: ActiveCategory, line: string) {
+    return rewriteClickableAliases(line, {
+      personas: this.resolvePersonasForBlock(),
+      channelAliases: this.resolveActiveChannelAliases(category)
+    });
+  }
+
+  private resolveActiveChannelAliases(category: ActiveCategory) {
+    const aliases: Array<{ keyword: string; channelId: string }> = [];
+    const addAlias = (keyword: string, sender?: SenderBot) => {
+      const channelId = (sender as any)?.defaultChannelId;
+      if (channelId) {
+        aliases.push({ keyword, channelId: String(channelId) });
+      }
+    };
+
+    if (category === "futures" || category === "alerts") {
+      const futuresWebhook = this.config.activeBlocks?.futures?.targetWebhook;
+      if (futuresWebhook) {
+        addAlias("wg-trades", this.getSenderForWebhook(futuresWebhook));
+      }
+    }
+
+    if (category === "spot" || category === "alerts") {
+      const spotWebhook = this.config.activeBlocks?.spot?.targetWebhook;
+      if (spotWebhook) {
+        addAlias("wg-spot", this.getSenderForWebhook(spotWebhook));
+      }
+    }
+
+    return aliases;
   }
 
   private rewriteDiscordSourceLinks(
