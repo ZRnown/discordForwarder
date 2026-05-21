@@ -983,6 +983,7 @@ export class SenderBot {
   ): Promise<any> {
     try {
       const url = new URL(this.webhookUrl);
+      await this.loadStoredThreadId();
       this.applyThreadParams(url);
       const path = `${url.pathname}/messages/${messageId}${url.search || ""}`;
       const options: https.RequestOptions = {
@@ -1046,6 +1047,8 @@ export class SenderBot {
 
   private async deleteWebhookMessageOnce(messageId: string): Promise<void> {
     const url = new URL(this.webhookUrl);
+    await this.loadStoredThreadId();
+    this.applyThreadParams(url);
     const path = `${url.pathname}/messages/${messageId}${url.search || ""}`;
     const options: https.RequestOptions = {
       method: "DELETE",
