@@ -22,7 +22,8 @@ import { FileLogger } from "./logger.js";
 import {
   buildActiveSlotSourceIdsForScope,
   buildActiveSlotSourceId,
-  partitionActivePreparedMessagesForEdit
+  partitionActivePreparedMessagesForEdit,
+  runActiveSourceQueued
 } from "./activeForwarding.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -3419,6 +3420,22 @@ export class Bot {
   }
 
   private async processAndSend(
+    message: Message,
+    tag?: string,
+    options?: { preferExistingTargetEdit?: boolean }
+  ) {
+    const activeCategory = this.resolveActiveCategory(message.channelId)?.key;
+    if (activeCategory) {
+      return runActiveSourceQueued(
+        `${activeCategory}:${message.id}`,
+        async () => this.processAndSendUnqueued(message, tag, options)
+      );
+    }
+
+    return this.processAndSendUnqueued(message, tag, options);
+  }
+
+  private async processAndSendUnqueued(
     message: Message,
     tag?: string,
     options?: { preferExistingTargetEdit?: boolean }

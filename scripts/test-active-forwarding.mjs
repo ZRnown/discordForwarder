@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildActiveSlotSourceId,
   buildActiveSlotSourceIdsForScope,
-  partitionActivePreparedMessagesForEdit
+  partitionActivePreparedMessagesForEdit,
+  runActiveSourceQueued
 } from "../dist/activeForwarding.js";
 
 const senderA = { name: "main" };
@@ -117,3 +118,24 @@ assert.deepEqual(
   muzzaginSlotIds.filter((slotId) => woodsSlotIds.includes(slotId)),
   []
 );
+
+const events = [];
+let releaseFirst;
+const first = runActiveSourceQueued("futures:1481016407201415179", async () => {
+  events.push("first-start");
+  await new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  events.push("first-end");
+});
+const second = runActiveSourceQueued(
+  "futures:1481016407201415179",
+  async () => {
+    events.push("second-start");
+  }
+);
+await new Promise((resolve) => setImmediate(resolve));
+assert.deepEqual(events, ["first-start"]);
+releaseFirst();
+await Promise.all([first, second]);
+assert.deepEqual(events, ["first-start", "first-end", "second-start"]);

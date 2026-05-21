@@ -54,6 +54,34 @@ export function buildActiveSlotSourceIdsForScope(
   );
 }
 
+const activeSourceQueues = new Map<string, Promise<unknown>>();
+
+export async function runActiveSourceQueued<T>(
+  key: string,
+  task: () => Promise<T>
+): Promise<T> {
+  const previous = activeSourceQueues.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const next = previous.then(
+    () => current,
+    () => current
+  );
+  activeSourceQueues.set(key, next);
+
+  await previous.catch(() => undefined);
+  try {
+    return await task();
+  } finally {
+    release();
+    if (activeSourceQueues.get(key) === next) {
+      activeSourceQueues.delete(key);
+    }
+  }
+}
+
 export function canEditActiveForwardItem(item: ActiveForwardItem): boolean {
   const singleMessageLimit = item.useEmbed ? 4096 : 2000;
   return (
