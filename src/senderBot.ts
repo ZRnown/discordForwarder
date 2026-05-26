@@ -88,6 +88,10 @@ export class SenderBot {
     });
   }
 
+  rewriteOutgoingForWebhook(text: string): string {
+    return this.rewriteOutgoingText(text);
+  }
+
   private rewriteSourceChannelReferences(text: string): string {
     const mappings = this.channelMentionMappings || {};
     if (!text || Object.keys(mappings).length === 0) {

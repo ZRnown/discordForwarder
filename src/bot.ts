@@ -244,6 +244,9 @@ export class Bot {
     });
 
     (this.client as any).on("messageCreate", async (message: Message) => {
+      if (await this.tryRewriteWebhookAliasMessage(message)) {
+        return;
+      }
       await this.processAndSend(message);
     });
 
@@ -337,6 +340,131 @@ export class Bot {
       return "legacy";
     }
     return "body_embed_only";
+  }
+
+  private getWebhookIdFromUrl(webhookUrl?: string) {
+    if (!webhookUrl) {
+      return undefined;
+    }
+    try {
+      const url = new URL(webhookUrl);
+      const parts = url.pathname.split("/").filter(Boolean);
+      const index = parts.indexOf("webhooks");
+      return index >= 0 && parts[index + 1] ? parts[index + 1] : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private findSenderForIncomingWebhookMessage(message: Message) {
+    const webhookId = (message as any)?.webhookId
+      ? String((message as any).webhookId)
+      : "";
+    if (!webhookId) {
+      return undefined;
+    }
+
+    for (const config of Object.values(this.config.activeBlocks ?? {})) {
+      if (!config?.targetWebhook) {
+        continue;
+      }
+      if (this.getWebhookIdFromUrl(config.targetWebhook) !== webhookId) {
+        continue;
+      }
+      const sender = this.getSenderForWebhook(config.targetWebhook);
+      if (
+        sender &&
+        (!sender.defaultChannelId ||
+          String(sender.defaultChannelId) === String(message.channelId))
+      ) {
+        return sender;
+      }
+    }
+    return undefined;
+  }
+
+  private rewriteMessageEmbedsForSender(embeds: readonly any[], sender: SenderBot) {
+    if (!Array.isArray(embeds)) {
+      return [];
+    }
+
+    return embeds.map((embed) => {
+      if (!embed || typeof embed !== "object") {
+        return embed;
+      }
+      const next = typeof embed.toJSON === "function" ? embed.toJSON() : { ...embed };
+      if (typeof next.description === "string") {
+        next.description = sender.rewriteOutgoingForWebhook(next.description);
+      }
+      if (typeof next.title === "string") {
+        next.title = sender.rewriteOutgoingForWebhook(next.title);
+      }
+      if (next.footer?.text && typeof next.footer.text === "string") {
+        next.footer = {
+          ...next.footer,
+          text: sender.rewriteOutgoingForWebhook(next.footer.text)
+        };
+      }
+      if (next.author?.name && typeof next.author.name === "string") {
+        next.author = {
+          ...next.author,
+          name: sender.rewriteOutgoingForWebhook(next.author.name)
+        };
+      }
+      if (Array.isArray(next.fields)) {
+        next.fields = next.fields.map((field: any) => ({
+          ...field,
+          ...(typeof field?.name === "string"
+            ? { name: sender.rewriteOutgoingForWebhook(field.name) }
+            : {}),
+          ...(typeof field?.value === "string"
+            ? { value: sender.rewriteOutgoingForWebhook(field.value) }
+            : {})
+        }));
+      }
+      return next;
+    });
+  }
+
+  async tryRewriteWebhookAliasMessage(message: Message): Promise<boolean> {
+    const sender = this.findSenderForIncomingWebhookMessage(message);
+    if (!sender) {
+      return false;
+    }
+
+    const originalContent = String((message as any).content || "");
+    const rewrittenContent = sender.rewriteOutgoingForWebhook(originalContent);
+    const rewrittenEmbeds = this.rewriteMessageEmbedsForSender(
+      (message as any).embeds || [],
+      sender
+    );
+    const originalEmbeds = ((message as any).embeds || []).map((embed: any) =>
+      typeof embed?.toJSON === "function" ? embed.toJSON() : embed
+    );
+
+    if (
+      rewrittenContent === originalContent &&
+      JSON.stringify(rewrittenEmbeds) === JSON.stringify(originalEmbeds)
+    ) {
+      return false;
+    }
+
+    try {
+      await sender.editWebhookMessage(String(message.id), {
+        content: rewrittenContent,
+        embeds: rewrittenEmbeds,
+        allowed_mentions: { parse: [], replied_user: false }
+      });
+      this.logger.info(
+        `[WEBHOOK_ALIAS_REWRITE] edited messageId=${message.id} webhookId=${(message as any).webhookId || "unknown"}`
+      );
+      return true;
+    } catch (err) {
+      this.logger.error(
+        `[WEBHOOK_ALIAS_REWRITE] failed messageId=${message.id} error=${String(err)}`
+      );
+      return false;
+    }
   }
 
   private useContentEmbedWebhookReplyFallbacks() {
