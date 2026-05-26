@@ -194,6 +194,8 @@ export class Bot {
     PendingSourceForwardState
   >();
   private rawGatewayMessages = new Map<string, RawGatewayMessageRecord>();
+  private webhookAliasScanTimer?: NodeJS.Timeout;
+  private webhookAliasScanInFlight = false;
 
   constructor(
     client: Client,
@@ -230,6 +232,7 @@ export class Bot {
     (this.client as any).on("ready", (clientArg: Client<true>) => {
       const msg = `已登录 Discord，账号 @${clientArg.user?.tag}`;
       this.logger.info(msg);
+      this.startWebhookAliasTargetScanner();
     });
 
     // 监听客户端错误，避免 ECONNRESET 直接导致进程崩溃
@@ -440,7 +443,97 @@ export class Bot {
     if (!sender) {
       return false;
     }
+    return this.rewriteWebhookAliasMessageWithSender(message, sender);
+  }
 
+  private getWebhookAliasTargetSenders() {
+    const senders: SenderBot[] = [];
+    const seen = new Set<SenderBot>();
+    for (const config of Object.values(this.config.activeBlocks ?? {})) {
+      if (!config?.targetWebhook) {
+        continue;
+      }
+      const sender = this.getSenderForWebhook(config.targetWebhook);
+      if (!sender || seen.has(sender) || !(sender as any).defaultChannelId) {
+        continue;
+      }
+      seen.add(sender);
+      senders.push(sender);
+    }
+    return senders;
+  }
+
+  async scanWebhookAliasTargetsOnce(limit = 20) {
+    if (this.webhookAliasScanInFlight) {
+      return;
+    }
+    this.webhookAliasScanInFlight = true;
+    try {
+      for (const sender of this.getWebhookAliasTargetSenders()) {
+        const channelId = (sender as any).defaultChannelId;
+        if (!channelId) {
+          continue;
+        }
+        try {
+          const channel = await (this.client as any).channels?.fetch?.(
+            String(channelId)
+          );
+          const messages = await channel?.messages?.fetch?.({ limit });
+          const values =
+            messages && typeof messages.values === "function"
+              ? Array.from(messages.values())
+              : Array.isArray(messages)
+                ? messages
+                : [];
+          for (const message of values) {
+            try {
+              const webhookId = (message as any)?.webhookId;
+              if (
+                webhookId &&
+                this.getWebhookIdFromUrl(sender.webhookUrl) !==
+                  String(webhookId)
+              ) {
+                continue;
+              }
+              await this.rewriteWebhookAliasMessageWithSender(
+                message as Message,
+                sender
+              );
+            } catch (err) {
+              this.logger.error(
+                `[WEBHOOK_ALIAS_SCAN] message failed channelId=${channelId} error=${String(err)}`
+              );
+            }
+          }
+        } catch (err) {
+          this.logger.error(
+            `[WEBHOOK_ALIAS_SCAN] channel failed channelId=${channelId} error=${String(err)}`
+          );
+        }
+      }
+    } finally {
+      this.webhookAliasScanInFlight = false;
+    }
+  }
+
+  private startWebhookAliasTargetScanner() {
+    if (this.webhookAliasScanTimer) {
+      return;
+    }
+    const scan = () => {
+      this.scanWebhookAliasTargetsOnce().catch((err) => {
+        this.logger.error(`[WEBHOOK_ALIAS_SCAN] failed error=${String(err)}`);
+      });
+    };
+    setTimeout(scan, 5000);
+    this.webhookAliasScanTimer = setInterval(scan, 30000);
+    this.webhookAliasScanTimer.unref?.();
+  }
+
+  private async rewriteWebhookAliasMessageWithSender(
+    message: Message,
+    sender: SenderBot
+  ): Promise<boolean> {
     const originalContent = String((message as any).content || "");
     const rewrittenContent = sender.rewriteOutgoingForWebhook(originalContent);
     const rewrittenEmbeds = this.rewriteMessageEmbedsForSender(
@@ -459,18 +552,18 @@ export class Bot {
     }
 
     try {
-      await sender.editWebhookMessage(String(message.id), {
+      await sender.editWebhookMessage(String((message as any).id), {
         content: rewrittenContent,
         embeds: rewrittenEmbeds,
         allowed_mentions: { parse: [], replied_user: false }
       });
       this.logger.info(
-        `[WEBHOOK_ALIAS_REWRITE] edited messageId=${message.id} webhookId=${(message as any).webhookId || "unknown"}`
+        `[WEBHOOK_ALIAS_REWRITE] edited messageId=${(message as any).id} webhookId=${(message as any).webhookId || "unknown"}`
       );
       return true;
     } catch (err) {
       this.logger.error(
-        `[WEBHOOK_ALIAS_REWRITE] failed messageId=${message.id} error=${String(err)}`
+        `[WEBHOOK_ALIAS_REWRITE] failed messageId=${(message as any).id} error=${String(err)}`
       );
       return false;
     }

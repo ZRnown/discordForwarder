@@ -76,3 +76,50 @@ const untouched = await bot.tryRewriteWebhookAliasMessage({
 });
 assert.equal(untouched, false);
 assert.equal(editCalls.length, 1);
+
+const fetchedMessages = [
+  {
+    id: "scan-change",
+    channelId: "1484167073939718404",
+    webhookId: "1484167152188526623",
+    content: "",
+    embeds: [
+      {
+        description:
+          ":Long: Long: UB | Entry: 0.20622 | SL: 0.2006 | Risk: 0.5% @🏌tareeq @🚀│wg-trades\n-----------\n:Long: 多头： UB | 入场价： 0.20622 | 止损： 0.2006 | 风险： 0.5% @🏌tareeq @🚀│wg-trades",
+        toJSON() {
+          return { description: this.description };
+        }
+      }
+    ]
+  },
+  {
+    id: "scan-unchanged",
+    channelId: "1484167073939718404",
+    webhookId: "1484167152188526623",
+    content: "",
+    embeds: [{ description: "already <#1399730222185713724>" }]
+  }
+];
+
+client.channels = {
+  fetch: async (channelId) => {
+    assert.equal(channelId, "1484167073939718404");
+    return {
+      messages: {
+        fetch: async ({ limit }) => {
+          assert.equal(limit, 20);
+          return new Map(fetchedMessages.map((item) => [item.id, item]));
+        }
+      }
+    };
+  }
+};
+
+await bot.scanWebhookAliasTargetsOnce();
+assert.equal(editCalls.length, 2);
+assert.equal(editCalls[1].messageId, "scan-change");
+assert.equal(
+  editCalls[1].body.embeds[0].description,
+  ":Long: Long: UB | Entry: 0.20622 | SL: 0.2006 | Risk: 0.5% <#1399730222185713724> <#1484167073939718404>\n-----------\n:Long: 多头： UB | 入场价： 0.20622 | 止损： 0.2006 | 风险： 0.5% <#1399730222185713724> <#1484167073939718404>"
+);

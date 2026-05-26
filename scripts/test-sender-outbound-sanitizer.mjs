@@ -19,7 +19,10 @@ https.request = (options, callback) => {
     res.statusMessage = "OK";
     callback(res);
     queueMicrotask(() => {
-      res.emit("data", Buffer.from('{"id":"150","channel_id":"1484167073939718404"}'));
+      res.emit(
+        "data",
+        Buffer.from('{"id":"150","channel_id":"1484167073939718404"}')
+      );
       res.emit("end");
     });
   };
@@ -53,6 +56,35 @@ try {
   assert.equal(
     sentBody.embeds[0].description,
     ":Spot: Long: ZEC | Entry: 662.71 | SL: 617.64 <#1399730201533087776> <#1484167073939718404>\n-----------\n:Spot: 多头： ZEC | 入场价： 662.71 | 止损价： 617.64 <#1399730201533087776> <#1484167073939718404>"
+  );
+
+  const tareeqSender = new SenderBot({
+    chatsToSend: [],
+    webhookUrl: "https://discord.com/api/webhooks/2/token",
+    clickableAliasPersonas: [
+      { keyword: "tareeq", jumpChannelId: "1399730222185713724" }
+    ],
+    clickableAliasChannels: [
+      { keyword: "wg-trades", channelId: "1484167073939718404" }
+    ]
+  });
+  tareeqSender.defaultChannelId = "1484167073939718404";
+
+  const rawTareeq =
+    ":Long: Long: UB | Entry: 0.20622 | SL: 0.2006 | Risk: 0.5% @🏌tareeq @🚀│wg-trades\n-----------\n:Long: 多头： UB | 入场价： 0.20622 | 止损： 0.2006 | 风险： 0.5% @🏌tareeq @🚀│wg-trades";
+
+  await tareeqSender.sendData([
+    {
+      content: rawTareeq,
+      useEmbed: true,
+      uploads: []
+    }
+  ]);
+
+  const sendBody = JSON.parse(capturedWrites.at(-1));
+  assert.equal(
+    sendBody.embeds[0].description,
+    ":Long: Long: UB | Entry: 0.20622 | SL: 0.2006 | Risk: 0.5% <#1399730222185713724> <#1484167073939718404>\n-----------\n:Long: 多头： UB | 入场价： 0.20622 | 止损： 0.2006 | 风险： 0.5% <#1399730222185713724> <#1484167073939718404>"
   );
 } finally {
   https.request = originalRequest;
