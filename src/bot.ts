@@ -20,6 +20,7 @@ import { SenderBot } from "./senderBot.js";
 import { getEnv } from "./env.js";
 import { FileLogger } from "./logger.js";
 import {
+  buildActiveDedupKey,
   buildActiveSlotSourceIdsForScope,
   buildActiveSlotSourceId,
   normalizeActiveDedupText,
@@ -40,6 +41,7 @@ interface RenderOutput {
 
 interface ActiveOverrideResult {
   content: string;
+  dedupKey?: string;
   senderBot?: SenderBot;
   extraSenderBots?: SenderBot[];
   username?: string;
@@ -1396,6 +1398,23 @@ export class Bot {
     await this.saveActiveLastSent();
   }
 
+  private getActiveDedupKey(
+    category: ActiveCategory | undefined,
+    personaMatches: PersonaMatch[],
+    sourceMessageId: string
+  ) {
+    return buildActiveDedupKey(
+      category,
+      personaMatches.map(
+        (match) =>
+          match.config.keyword ||
+          match.config.userId ||
+          match.config.sourceChannelId
+      ),
+      sourceMessageId
+    );
+  }
+
   private async backfillActiveSlotMappings() {
     const threadStore = await this.loadWebhookThreadStore();
     let changed = false;
@@ -2241,7 +2260,13 @@ export class Bot {
     }
 
     // 在输出日志之前，先检查内容是否与上次相同
-    const lastSent = this.activeLastSent.get(message.id);
+    const dedupKey = this.getActiveDedupKey(
+      activeMatch.key,
+      personaMatches,
+      message.id
+    );
+    const lastSent =
+      this.activeLastSent.get(dedupKey) || this.activeLastSent.get(message.id);
     if (lastSent) {
       // 快速计算 finalText 用于去重检查（包括回复头部，但不包括翻译）
       let quickFinalText = translated.trim();
@@ -2324,6 +2349,7 @@ export class Bot {
 
     return {
       content: finalContent,
+      dedupKey,
       senderBot,
       extraSenderBots,
       // 始终优先使用 userId 查到的用户名；若获取失败，则退回源作者名称
@@ -3788,7 +3814,10 @@ export class Bot {
         }
 
         // 检查是否与上次相同（允许部分匹配，因为 finalText 可能包含翻译）
-        const last = this.activeLastSent.get(message.id);
+        const last =
+          (activeOverride?.dedupKey
+            ? this.activeLastSent.get(activeOverride.dedupKey)
+            : undefined) || this.activeLastSent.get(message.id);
         if (last) {
           // 如果上次的内容包含当前内容，或者当前内容包含上次内容，认为是重复
           // 先过滤掉动态内容（如时间戳）再比较
@@ -4133,7 +4162,10 @@ export class Bot {
 
       // activeBlocks 消息去重：保存实际要发送的最终文本
       if (activeOverride) {
-        await this.rememberActiveLastSent(message.id, finalText);
+        await this.rememberActiveLastSent(
+          activeOverride.dedupKey || message.id,
+          finalText
+        );
       }
 
       const buildActionRows = (buttons: any[]) => {

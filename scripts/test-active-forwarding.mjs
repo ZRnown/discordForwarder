@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  buildActiveDedupKey,
   buildActiveSlotSourceId,
   buildActiveSlotSourceIdsForScope,
   normalizeActiveDedupText,
@@ -164,4 +165,13 @@ assert.equal(
   normalizeActiveDedupText(
     "<:Long:1446387197128212530> HYPE | 入场价: 64.412 <#1400068692410110053> <#1400068611044802621>"
   )
+);
+
+assert.equal(
+  buildActiveDedupKey("futures", ["Tareeq"], "1481016469004488797"),
+  buildActiveDedupKey("futures", ["Tareeq"], "1481016470000000000")
+);
+assert.notEqual(
+  buildActiveDedupKey("futures", ["Tareeq"], "1481016469004488797"),
+  buildActiveDedupKey("spot", ["Tareeq"], "1481016469004488797")
 );

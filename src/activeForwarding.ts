@@ -28,6 +28,22 @@ export function buildActiveSlotSourceId(category: string, scopeKey: string) {
   return `active-slot:${category}:${scopeKey}`;
 }
 
+export function buildActiveDedupKey(
+  category: string | undefined,
+  personaKeys: unknown[],
+  fallbackSourceMessageId: string
+) {
+  const normalizedPersonas = personaKeys
+    .map((key) => String(key || "").trim().toLowerCase())
+    .filter(Boolean)
+    .sort();
+  const scope =
+    normalizedPersonas.length > 0
+      ? normalizedPersonas.join("+")
+      : `message:${fallbackSourceMessageId}`;
+  return `active-dedup:${category || "unknown"}:${scope}`;
+}
+
 const ACTIVE_DEDUP_ZERO_WIDTH_REGEX = /[\u200B-\u200F\u2028\u2029\uFEFF\u2060]/g;
 
 function normalizeStrategyEmojiName(name: string) {
