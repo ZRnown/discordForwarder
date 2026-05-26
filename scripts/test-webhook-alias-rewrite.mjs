@@ -9,7 +9,8 @@ const sender = new SenderBot({
   chatsToSend: [],
   webhookUrl: "https://discord.com/api/webhooks/1484167152188526623/token",
   clickableAliasPersonas: [
-    { keyword: "tareeq", jumpChannelId: "1399730222185713724" }
+    { keyword: "tareeq", jumpChannelId: "1399730222185713724" },
+    { keyword: "woods", jumpChannelId: "1400070271074828368" }
   ],
   clickableAliasChannels: [
     { keyword: "wg-trades", channelId: "1484167073939718404" }
@@ -77,6 +78,33 @@ const untouched = await bot.tryRewriteWebhookAliasMessage({
 assert.equal(untouched, false);
 assert.equal(editCalls.length, 1);
 
+bot.rememberRawGatewayMessage({
+  id: "1508861213168111761",
+  webhook_id: "1484167152188526623"
+});
+
+const handledFromRawWebhookId = await bot.tryRewriteWebhookAliasMessage({
+  id: "1508861213168111761",
+  channelId: "1484167073939718404",
+  content: "",
+  embeds: [
+    {
+      description:
+        ":Long: Long: BTC | Entry: 75500 - 75100 | SL: 73500 | Risk: 2.5% @💨woods @🚀│wg-trades\n-----------\n:Long: 多头： BTC | 入场： 75500 - 75100 | 止损： 73500 | 风险： 2.5% @💨woods @🚀│wg-trades",
+      toJSON() {
+        return { description: this.description };
+      }
+    }
+  ]
+});
+assert.equal(handledFromRawWebhookId, true);
+assert.equal(editCalls.length, 2);
+assert.equal(editCalls[1].messageId, "1508861213168111761");
+assert.equal(
+  editCalls[1].body.embeds[0].description,
+  ":Long: Long: BTC | Entry: 75500 - 75100 | SL: 73500 | Risk: 2.5% <#1400070271074828368> <#1484167073939718404>\n-----------\n:Long: 多头： BTC | 入场： 75500 - 75100 | 止损： 73500 | 风险： 2.5% <#1400070271074828368> <#1484167073939718404>"
+);
+
 const fetchedMessages = [
   {
     id: "scan-change",
@@ -117,9 +145,9 @@ client.channels = {
 };
 
 await bot.scanWebhookAliasTargetsOnce();
-assert.equal(editCalls.length, 2);
-assert.equal(editCalls[1].messageId, "scan-change");
+assert.equal(editCalls.length, 3);
+assert.equal(editCalls[2].messageId, "scan-change");
 assert.equal(
-  editCalls[1].body.embeds[0].description,
+  editCalls[2].body.embeds[0].description,
   ":Long: Long: UB | Entry: 0.20622 | SL: 0.2006 | Risk: 0.5% <#1399730222185713724> <#1484167073939718404>\n-----------\n:Long: 多头： UB | 入场价： 0.20622 | 止损： 0.2006 | 风险： 0.5% <#1399730222185713724> <#1484167073939718404>"
 );

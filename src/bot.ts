@@ -109,6 +109,7 @@ interface RawGatewayReferencedMessage {
 interface RawGatewayMessageRecord {
   reference?: RawGatewayReference;
   referencedMessage?: RawGatewayReferencedMessage;
+  webhookId?: string;
 }
 
 interface ForwardUpload {
@@ -368,10 +369,17 @@ export class Bot {
     }
   }
 
+  private getWebhookIdForMessage(message: Message | PartialMessage) {
+    const directWebhookId = (message as any)?.webhookId ?? (message as any)?.webhook_id;
+    if (directWebhookId) {
+      return String(directWebhookId);
+    }
+    const rawGatewayRecord = this.rawGatewayMessages.get(String((message as any)?.id || ""));
+    return rawGatewayRecord?.webhookId;
+  }
+
   private findSenderForIncomingWebhookMessage(message: Message) {
-    const webhookId = (message as any)?.webhookId
-      ? String((message as any).webhookId)
-      : "";
+    const webhookId = this.getWebhookIdForMessage(message);
     if (!webhookId) {
       return undefined;
     }
@@ -488,10 +496,12 @@ export class Bot {
           for (const message of values) {
             try {
               const webhookId = (message as any)?.webhookId;
+              const resolvedWebhookId =
+                webhookId || this.getWebhookIdForMessage(message as Message);
               if (
-                webhookId &&
+                resolvedWebhookId &&
                 this.getWebhookIdFromUrl(sender.webhookUrl) !==
-                  String(webhookId)
+                  String(resolvedWebhookId)
               ) {
                 continue;
               }
@@ -521,12 +531,12 @@ export class Bot {
       return;
     }
     const scan = () => {
-      this.scanWebhookAliasTargetsOnce().catch((err) => {
+      this.scanWebhookAliasTargetsOnce(100).catch((err) => {
         this.logger.error(`[WEBHOOK_ALIAS_SCAN] failed error=${String(err)}`);
       });
     };
     setTimeout(scan, 5000);
-    this.webhookAliasScanTimer = setInterval(scan, 30000);
+    this.webhookAliasScanTimer = setInterval(scan, 10000);
     this.webhookAliasScanTimer.unref?.();
   }
 
@@ -681,6 +691,9 @@ export class Bot {
     }
 
     const record: RawGatewayMessageRecord = {};
+    if (rawMessage.webhook_id != null) {
+      record.webhookId = String(rawMessage.webhook_id);
+    }
     const messageReference = rawMessage.message_reference;
     if (messageReference?.message_id) {
       record.reference = {
@@ -755,7 +768,7 @@ export class Bot {
       };
     }
 
-    if (record.reference || record.referencedMessage) {
+    if (record.reference || record.referencedMessage || record.webhookId) {
       this.rawGatewayMessages.set(String(rawMessage.id), record);
     }
   }
