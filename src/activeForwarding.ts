@@ -72,6 +72,18 @@ export function normalizeActiveDedupText(text: string): string {
     .trim();
 }
 
+export function activeDedupTextsMatch(lastText: string, currentText: string) {
+  const normalizedLast = normalizeActiveDedupText(lastText.trim());
+  const normalizedCurrent = normalizeActiveDedupText(currentText.trim());
+  return (
+    normalizedLast === normalizedCurrent ||
+    normalizedLast.endsWith(normalizedCurrent) ||
+    normalizedCurrent.endsWith(normalizedLast) ||
+    (normalizedLast.includes(normalizedCurrent) &&
+      normalizedCurrent.length > 50)
+  );
+}
+
 export function buildActiveSlotSourceIdsForScope(
   category: string | undefined,
   scope?: ActiveTargetScope

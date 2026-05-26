@@ -20,6 +20,7 @@ import { SenderBot } from "./senderBot.js";
 import { getEnv } from "./env.js";
 import { FileLogger } from "./logger.js";
 import {
+  activeDedupTextsMatch,
   buildActiveDedupKey,
   buildActiveSlotSourceIdsForScope,
   buildActiveSlotSourceId,
@@ -1398,6 +1399,18 @@ export class Bot {
     await this.saveActiveLastSent();
   }
 
+  private findMatchingLegacyActiveLastSent(currentText: string) {
+    for (const [key, value] of this.activeLastSent.entries()) {
+      if (key.startsWith("active-dedup:")) {
+        continue;
+      }
+      if (activeDedupTextsMatch(value, currentText)) {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
   private getActiveDedupKey(
     category: ActiveCategory | undefined,
     personaMatches: PersonaMatch[],
@@ -2265,51 +2278,51 @@ export class Bot {
       personaMatches,
       message.id
     );
+    // 快速计算 finalText 用于去重检查（包括回复头部，但不包括翻译）
+    let quickFinalText = translated.trim();
+
+    // 如果有回复，添加回复头部
+    const replyReference = this.getReplyReference(message);
+    if (replyReference?.messageId) {
+      let authorName: string | undefined;
+      try {
+        const ru: any = (message as any).mentions?.repliedUser;
+        if (ru) {
+          authorName = ru.globalName || ru.username || ru.tag;
+        }
+      } catch {}
+      if (!authorName) {
+        try {
+          const ref = await this.fetchReplyReferenceMessage(message);
+          authorName =
+            (ref?.author as any)?.globalName ||
+            ref?.author?.username ||
+            ref?.author?.tag ||
+            undefined;
+        } catch {}
+      }
+      if (!authorName) authorName = "某条消息";
+      const gid = message.guildId || "@me";
+      const refChan = replyReference.channelId || message.channelId;
+      const replyUrl = `https://discord.com/channels/${gid}/${refChan}/${replyReference.messageId}`;
+      quickFinalText = `↳ @${authorName} • ${replyUrl}\n${quickFinalText}`;
+    }
+
     const lastSent =
       this.activeLastSent.get(dedupKey) || this.activeLastSent.get(message.id);
     if (lastSent) {
-      // 快速计算 finalText 用于去重检查（包括回复头部，但不包括翻译）
-      let quickFinalText = translated.trim();
-
-      // 如果有回复，添加回复头部
-      const replyReference = this.getReplyReference(message);
-      if (replyReference?.messageId) {
-        let authorName: string | undefined;
-        try {
-          const ru: any = (message as any).mentions?.repliedUser;
-          if (ru) {
-            authorName = ru.globalName || ru.username || ru.tag;
-          }
-        } catch {}
-        if (!authorName) {
-          try {
-            const ref = await this.fetchReplyReferenceMessage(message);
-            authorName =
-              (ref?.author as any)?.globalName ||
-              ref?.author?.username ||
-              ref?.author?.tag ||
-              undefined;
-          } catch {}
-        }
-        if (!authorName) authorName = "某条消息";
-        const gid = message.guildId || "@me";
-        const refChan = replyReference.channelId || message.channelId;
-        const replyUrl = `https://discord.com/channels/${gid}/${refChan}/${replyReference.messageId}`;
-        quickFinalText = `↳ @${authorName} • ${replyUrl}\n${quickFinalText}`;
-      }
-
       // 检查是否与上次相同（允许部分匹配，因为 finalText 可能包含翻译）
       // 先过滤掉动态内容（如时间戳）再比较
-      const normalizedLast = filterDynamicContent(lastSent.trim());
-      const normalizedCurrent = filterDynamicContent(quickFinalText.trim());
-      if (
-        normalizedLast === normalizedCurrent ||
-        normalizedLast.endsWith(normalizedCurrent) ||
-        normalizedCurrent.endsWith(normalizedLast) ||
-        (normalizedLast.includes(normalizedCurrent) &&
-          normalizedCurrent.length > 50)
-      ) {
+      if (activeDedupTextsMatch(lastSent, quickFinalText)) {
         // 内容相同，静默返回，不输出任何日志
+        return null;
+      }
+    } else {
+      const legacyLastSent = this.findMatchingLegacyActiveLastSent(
+        quickFinalText
+      );
+      if (legacyLastSent) {
+        await this.rememberActiveLastSent(dedupKey, legacyLastSent);
         return null;
       }
     }
@@ -3821,15 +3834,7 @@ export class Bot {
         if (last) {
           // 如果上次的内容包含当前内容，或者当前内容包含上次内容，认为是重复
           // 先过滤掉动态内容（如时间戳）再比较
-          const normalizedLast = filterDynamicContent(last.trim());
-          const normalizedCurrent = filterDynamicContent(quickFinalText.trim());
-          if (
-            normalizedLast === normalizedCurrent ||
-            normalizedLast.endsWith(normalizedCurrent) ||
-            normalizedCurrent.endsWith(normalizedLast) ||
-            (normalizedLast.includes(normalizedCurrent) &&
-              normalizedCurrent.length > 50)
-          ) {
+          if (activeDedupTextsMatch(last, quickFinalText)) {
             // 内容相同，静默跳过，不输出任何日志
             return;
           }
