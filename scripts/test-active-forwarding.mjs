@@ -8,8 +8,8 @@ import {
 } from "../dist/activeForwarding.js";
 
 const senderA = { name: "main" };
-const senderB = { name: "thread-a" };
-const senderC = { name: "thread-b" };
+const senderB = { name: "thread-a", threadName: "muzzagin" };
+const senderC = { name: "thread-b", threadName: "woods" };
 const senderD = { name: "upload" };
 const targets = new Map([
   [
@@ -60,13 +60,12 @@ assert.deepEqual(
     target.messageId
   ]),
   [
-    ["main", "1400068611044802621", "1506579700074549248"],
-    ["thread-a", "1506590874589593620", "1507000000000000001"]
+    ["main", "1400068611044802621", "1506579700074549248"]
   ]
 );
 assert.deepEqual(
   plan.sendable.map(({ sender }) => sender.name),
-  ["thread-b", "upload"]
+  ["thread-a", "thread-b", "upload"]
 );
 
 const tooLong = partitionActivePreparedMessagesForEdit(

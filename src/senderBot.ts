@@ -4,6 +4,11 @@ import path from "node:path";
 import { URL } from "node:url";
 
 import { ChannelId } from "./config.js";
+import {
+  ClickableAliasChannel,
+  ClickableAliasPersona,
+  rewriteClickableAliases
+} from "./clickableAliases.js";
 
 const webhookInfoCache = new Map<
   string,
@@ -30,6 +35,9 @@ export class SenderBot {
   avatarUrl?: string;
   threadId?: string;
   threadName?: string;
+  clickableAliasPersonas?: ClickableAliasPersona[];
+  clickableAliasChannels?: ClickableAliasChannel[];
+  channelMentionMappings?: Record<string, string>;
   private threadIdLoaded = false;
   private webhookRequestQueue: Promise<void> = Promise.resolve();
 
@@ -43,6 +51,9 @@ export class SenderBot {
     avatarUrl?: string;
     threadId?: string;
     threadName?: string;
+    clickableAliasPersonas?: ClickableAliasPersona[];
+    clickableAliasChannels?: ClickableAliasChannel[];
+    channelMentionMappings?: Record<string, string>;
     emojiMap?: Record<
       string,
       string | { id: string; name?: string; animated?: boolean }
@@ -58,6 +69,9 @@ export class SenderBot {
     this.avatarUrl = options.avatarUrl;
     this.threadId = options.threadId;
     this.threadName = options.threadName;
+    this.clickableAliasPersonas = options.clickableAliasPersonas;
+    this.clickableAliasChannels = options.clickableAliasChannels;
+    this.channelMentionMappings = options.channelMentionMappings;
   }
 
   private rewriteOutgoingText(text: string): string {
@@ -65,7 +79,38 @@ export class SenderBot {
     for (const [a, b] of Object.entries(this.replacementsDictionary)) {
       rewritten = rewritten.replaceAll(a, b);
     }
-    return this.rewriteCustomEmojisInText(rewritten);
+    rewritten = this.rewriteCustomEmojisInText(rewritten);
+    rewritten = this.rewriteSourceChannelReferences(rewritten);
+    return rewriteClickableAliases(rewritten, {
+      personas: this.clickableAliasPersonas,
+      channelAliases: this.clickableAliasChannels,
+      preferredChannelId: this.defaultChannelId
+    });
+  }
+
+  private rewriteSourceChannelReferences(text: string): string {
+    const mappings = this.channelMentionMappings || {};
+    if (!text || Object.keys(mappings).length === 0) {
+      return text;
+    }
+
+    let rewritten = text.replace(/<#(\d+)>/g, (full, channelId) => {
+      const targetChannelId = mappings[String(channelId)];
+      return targetChannelId ? `<#${targetChannelId}>` : full;
+    });
+
+    rewritten = rewritten.replace(
+      /https:\/\/(?:ptb\.)?discord(?:app)?\.com\/channels\/(\d+)\/(\d+)(?:\/(\d+))?/g,
+      (full, _guildId, channelId) => {
+        const targetChannelId = mappings[String(channelId)];
+        if (!targetChannelId || !this.webhookGuildId) {
+          return full;
+        }
+        return `https://discord.com/channels/${this.webhookGuildId}/${targetChannelId}`;
+      }
+    );
+
+    return rewritten;
   }
 
   private resolveEmojiReplacement(
@@ -215,6 +260,44 @@ export class SenderBot {
     });
   }
 
+  private rewriteOutgoingComponents(components?: any[]) {
+    if (!Array.isArray(components)) {
+      return components;
+    }
+
+    return components.map((component) => {
+      if (!component || typeof component !== "object") {
+        return component;
+      }
+
+      const next = { ...component };
+      if (typeof next.label === "string") {
+        next.label = this.rewriteOutgoingText(next.label);
+      }
+      if (typeof next.url === "string") {
+        next.url = this.rewriteOutgoingText(next.url);
+      }
+      if (Array.isArray(next.components)) {
+        next.components = this.rewriteOutgoingComponents(next.components);
+      }
+      return next;
+    });
+  }
+
+  private rewriteOutgoingWebhookBody(body: Record<string, any>) {
+    const next = { ...body };
+    if (typeof next.content === "string") {
+      next.content = this.rewriteOutgoingText(next.content);
+    }
+    if (Array.isArray(next.embeds)) {
+      next.embeds = this.rewriteOutgoingEmbeds(next.embeds);
+    }
+    if (Array.isArray(next.components)) {
+      next.components = this.rewriteOutgoingComponents(next.components);
+    }
+    return next;
+  }
+
   private sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -318,6 +401,7 @@ export class SenderBot {
     files: Array<{ filename: string; buffer: Buffer }>,
     wait = false
   ): Promise<any> {
+    body = this.rewriteOutgoingWebhookBody(body);
     const url = new URL(this.webhookUrl);
     await this.loadStoredThreadId();
     this.applyThreadParams(url);
@@ -884,6 +968,7 @@ export class SenderBot {
     body: Record<string, any>,
     wait = false
   ): Promise<any> {
+    body = this.rewriteOutgoingWebhookBody(body);
     const url = new URL(this.webhookUrl);
     await this.loadStoredThreadId();
     this.applyThreadParams(url);
@@ -982,6 +1067,7 @@ export class SenderBot {
     body: Record<string, any>
   ): Promise<any> {
     try {
+      body = this.rewriteOutgoingWebhookBody(body);
       const url = new URL(this.webhookUrl);
       await this.loadStoredThreadId();
       this.applyThreadParams(url);

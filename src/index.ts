@@ -204,6 +204,133 @@ async function bootstrap() {
 
     await Promise.all(prepares);
 
+    const buildClickableAliasPersonas = () => {
+      return Object.entries(config.activePersonas ?? {}).map(
+        ([key, persona]) => ({
+          keyword: persona.keyword || key,
+          identityRoleId: persona.identityRoleId,
+          jumpChannelId: persona.jumpChannelId
+        })
+      );
+    };
+
+    const buildClickableAliasChannels = () => {
+      const aliases: Array<{ keyword: string; channelId: string }> = [];
+      for (const [channelId, webhookEntry] of Object.entries(
+        config.channelWebhooks ?? {}
+      )) {
+        const entries = Array.isArray(webhookEntry)
+          ? webhookEntry
+          : [webhookEntry];
+        for (const entry of entries) {
+          const remark = typeof entry === "string" ? undefined : entry.remark;
+          if (!remark) continue;
+          const matched = remark.match(/源频道「([^」]+)」/);
+          if (matched?.[1]) {
+            aliases.push({ keyword: matched[1], channelId });
+          }
+        }
+      }
+      const futuresSender = config.activeBlocks?.futures?.targetWebhook
+        ? senderBotsByWebhook.get(config.activeBlocks.futures.targetWebhook)
+        : undefined;
+      if ((futuresSender as any)?.defaultChannelId) {
+        aliases.push({
+          keyword: "wg-trades",
+          channelId: String((futuresSender as any).defaultChannelId)
+        });
+      }
+      const alertsSender = config.activeBlocks?.alerts?.targetWebhook
+        ? senderBotsByWebhook.get(config.activeBlocks.alerts.targetWebhook)
+        : undefined;
+      if ((alertsSender as any)?.defaultChannelId) {
+        aliases.push({
+          keyword: "wg-trades",
+          channelId: String((alertsSender as any).defaultChannelId)
+        });
+      }
+
+      const spotSender = config.activeBlocks?.spot?.targetWebhook
+        ? senderBotsByWebhook.get(config.activeBlocks.spot.targetWebhook)
+        : undefined;
+      if ((spotSender as any)?.defaultChannelId) {
+        aliases.push({
+          keyword: "wg-spot",
+          channelId: String((spotSender as any).defaultChannelId)
+        });
+      }
+      return aliases;
+    };
+
+    const buildChannelMentionMappings = () => {
+      const mappings: Record<string, string> = {};
+      for (const [sourceChannelId, senders] of senderBotsBySource.entries()) {
+        const targetChannelId = (senders[0] as any)?.defaultChannelId;
+        if (targetChannelId) {
+          mappings[String(sourceChannelId)] = String(targetChannelId);
+        }
+      }
+      for (const persona of Object.values(config.activePersonas ?? {})) {
+        if (persona.sourceChannelId && persona.jumpChannelId) {
+          mappings[String(persona.sourceChannelId)] = String(
+            persona.jumpChannelId
+          );
+        }
+      }
+
+      const futuresSender = config.activeBlocks?.futures?.targetWebhook
+        ? senderBotsByWebhook.get(config.activeBlocks.futures.targetWebhook)
+        : undefined;
+      const futuresTargetChannelId = (futuresSender as any)?.defaultChannelId;
+      const futuresSourceIds =
+        config.activeBlocks?.futures?.sourceChannelIds ??
+        (config.activeBlocks?.futures?.sourceChannelId
+          ? [config.activeBlocks.futures.sourceChannelId]
+          : []);
+      for (const sourceChannelId of futuresSourceIds) {
+        if (futuresTargetChannelId) {
+          mappings[String(sourceChannelId)] = String(futuresTargetChannelId);
+        }
+      }
+
+      const spotSender = config.activeBlocks?.spot?.targetWebhook
+        ? senderBotsByWebhook.get(config.activeBlocks.spot.targetWebhook)
+        : undefined;
+      const spotTargetChannelId = (spotSender as any)?.defaultChannelId;
+      const spotSourceIds =
+        config.activeBlocks?.spot?.sourceChannelIds ??
+        (config.activeBlocks?.spot?.sourceChannelId
+          ? [config.activeBlocks.spot.sourceChannelId]
+          : []);
+      for (const sourceChannelId of spotSourceIds) {
+        if (spotTargetChannelId) {
+          mappings[String(sourceChannelId)] = String(spotTargetChannelId);
+        }
+      }
+      return mappings;
+    };
+
+    const clickableAliasPersonas = buildClickableAliasPersonas();
+    const clickableAliasChannels = buildClickableAliasChannels();
+    if (shouldLog) {
+      console.log(
+        "[Startup] clickable aliases:",
+        JSON.stringify({
+          personas: clickableAliasPersonas.map((item) => ({
+            keyword: item.keyword,
+            jumpChannelId: item.jumpChannelId
+          })),
+          channels: clickableAliasChannels
+        })
+      );
+    }
+    const channelMentionMappings = buildChannelMentionMappings();
+    for (const sb of new Set(senderBotsByWebhook.values())) {
+      (sb as any).clickableAliasPersonas = clickableAliasPersonas;
+      (sb as any).clickableAliasChannels = clickableAliasChannels;
+      (sb as any).channelMentionMappings = channelMentionMappings;
+    }
+
     // Output webhook info to help configure historyScan.channels
     {
       const seen = new Set<SenderBot>();

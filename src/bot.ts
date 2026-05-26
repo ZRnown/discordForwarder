@@ -27,7 +27,11 @@ import {
 } from "./activeForwarding.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { rewriteClickableAliases } from "./clickableAliases.js";
+import {
+  extractClickableAliasFromRemark,
+  rewriteClickableAliases
+} from "./clickableAliases.js";
+import { protectMentionLikeTokensForTranslation } from "./translationProtection.js";
 
 interface RenderOutput {
   content: string;
@@ -2137,6 +2141,7 @@ export class Bot {
     );
     const overrideButtons = personaButton ? [personaButton] : undefined;
     const extraSenderBots = this.buildActiveThreadSenderBots(
+      activeMatch.key,
       activeMatch.config,
       personaMatches
     );
@@ -2154,6 +2159,7 @@ export class Bot {
   }
 
   private buildActiveThreadSenderBots(
+    category: ActiveCategory,
     config: ActiveCategoryConfig,
     personaMatches: PersonaMatch[]
   ) {
@@ -2177,7 +2183,10 @@ export class Bot {
           replacementsDictionary: this.config.replacementsDictionary,
           webhookUrl: config.threadWebhook,
           remark: `activeBlocks thread: ${threadName}`,
-          threadName
+          threadName,
+          clickableAliasPersonas: this.resolvePersonasForBlock(),
+          clickableAliasChannels: this.resolveActiveChannelAliases(category),
+          channelMentionMappings: this.resolveChannelMentionMappings(category)
         })
       );
     }
@@ -2777,14 +2786,34 @@ export class Bot {
       }
     };
 
-    if (category === "futures" || category === "alerts") {
+    for (const [sourceId, webhookEntry] of Object.entries(
+      this.config.channelWebhooks ?? {}
+    )) {
+      const entries = Array.isArray(webhookEntry) ? webhookEntry : [webhookEntry];
+      for (const entry of entries) {
+        const remark = typeof entry === "string" ? undefined : entry.remark;
+        const keyword = extractClickableAliasFromRemark(remark);
+        if (!keyword) {
+          continue;
+        }
+        const sender = this.getSenderForChannel(String(sourceId));
+        addAlias(keyword, sender);
+      }
+    }
+
+    if (category === "alerts" || category === "spot") {
+      const alertsWebhook = this.config.activeBlocks?.alerts?.targetWebhook;
+      if (alertsWebhook) {
+        addAlias("wg-trades", this.getSenderForWebhook(alertsWebhook));
+      }
+    } else if (category === "futures") {
       const futuresWebhook = this.config.activeBlocks?.futures?.targetWebhook;
       if (futuresWebhook) {
         addAlias("wg-trades", this.getSenderForWebhook(futuresWebhook));
       }
     }
 
-    if (category === "spot" || category === "alerts") {
+    if (category === "spot") {
       const spotWebhook = this.config.activeBlocks?.spot?.targetWebhook;
       if (spotWebhook) {
         addAlias("wg-spot", this.getSenderForWebhook(spotWebhook));
@@ -2792,6 +2821,52 @@ export class Bot {
     }
 
     return aliases;
+  }
+
+  private resolveChannelMentionMappings(category?: ActiveCategory) {
+    const mappings: Record<string, string> = {};
+
+    for (const [sourceId, webhookEntry] of Object.entries(
+      this.config.channelWebhooks ?? {}
+    )) {
+      const entries = Array.isArray(webhookEntry) ? webhookEntry : [webhookEntry];
+      const sender = this.getSenderForChannel(String(sourceId));
+      const targetChannelId = (sender as any)?.defaultChannelId;
+      if (entries.length > 0 && targetChannelId) {
+        mappings[String(sourceId)] = String(targetChannelId);
+      }
+    }
+
+    for (const persona of Object.values(this.config.activePersonas ?? {})) {
+      if (persona.sourceChannelId && persona.jumpChannelId) {
+        mappings[String(persona.sourceChannelId)] = String(
+          persona.jumpChannelId
+        );
+      }
+    }
+
+    const addBlockMapping = (block?: ActiveCategoryConfig) => {
+      if (!block?.targetWebhook) {
+        return;
+      }
+      const sender = this.getSenderForWebhook(block.targetWebhook);
+      const targetChannelId = (sender as any)?.defaultChannelId;
+      if (!targetChannelId) {
+        return;
+      }
+      for (const sourceChannelId of this.getBlockSourceIds(block)) {
+        mappings[String(sourceChannelId)] = String(targetChannelId);
+      }
+    };
+
+    if (!category || category === "futures" || category === "alerts") {
+      addBlockMapping(this.config.activeBlocks?.futures);
+    }
+    if (!category || category === "spot" || category === "alerts") {
+      addBlockMapping(this.config.activeBlocks?.spot);
+    }
+
+    return mappings;
   }
 
   private rewriteDiscordSourceLinks(
@@ -3811,6 +3886,23 @@ export class Bot {
         }
       } catch {}
 
+      const resolvedOutgoingCategory = this.resolveActiveCategory(
+        message.channelId
+      )?.key;
+      const outgoingAliasCategory =
+        resolvedOutgoingCategory ||
+        (/\bwg-trades\b/i.test(finalText)
+          ? "futures"
+          : /\bwg-spot\b/i.test(finalText)
+            ? "spot"
+            : undefined);
+      if (outgoingAliasCategory) {
+        finalText = this.rewriteClickableTextAliases(
+          outgoingAliasCategory,
+          finalText
+        );
+      }
+
       // 对于 spot、futures、alerts 消息，在转发前替换表情符号
       if (activeOverride) {
         const activeCategory = this.resolveActiveCategory(
@@ -4404,9 +4496,10 @@ export class Bot {
       const key = String(this.env.DEEPSEEK_API_KEY || "");
       if (!url || !key) return null;
 
-      // Protect emoji aliases, custom emojis, and native emojis from being altered by translation
+      // Protect mention-like aliases, emoji aliases, custom emojis, and native emojis from being altered by translation
+      const mentionProtection = protectMentionLikeTokensForTranslation(raw);
       const placeholders: string[] = [];
-      let safe = raw.replace(/<a?:[A-Za-z0-9_~+.-]+:\\d+>/g, (m) => {
+      let safe = mentionProtection.text.replace(/<a?:[A-Za-z0-9_~+.-]+:\\d+>/g, (m) => {
         const idx = placeholders.push(m) - 1;
         return `__EMJ_${idx}__`;
       });
@@ -4509,7 +4602,7 @@ export class Bot {
               ? placeholders[idx]
               : _;
           });
-          return content.trim();
+          return mentionProtection.restore(content).trim();
         } catch (err) {
           lastError = err;
           if (attempt < maxAttempts) {
