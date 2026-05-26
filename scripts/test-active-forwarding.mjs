@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildActiveSlotSourceId,
   buildActiveSlotSourceIdsForScope,
+  normalizeActiveDedupText,
   partitionActivePreparedMessagesForEdit,
   runActiveSourceQueued
 } from "../dist/activeForwarding.js";
@@ -138,3 +139,29 @@ assert.deepEqual(events, ["first-start"]);
 releaseFirst();
 await Promise.all([first, second]);
 assert.deepEqual(events, ["first-start", "first-end", "second-start"]);
+
+const activeTextWithNamedEmoji =
+  "⁠🏌｜tareeq\n<:Long:1446387197128212530> HYPE | 入场价: 64.412 | 止损价: 63.01";
+const activeTextWithRawEmoji =
+  "⁠🏌｜tareeq\n:Long: HYPE | 入场价: 64.412 | 止损价: 63.01";
+
+assert.equal(
+  normalizeActiveDedupText(activeTextWithNamedEmoji),
+  normalizeActiveDedupText(activeTextWithRawEmoji)
+);
+
+assert.notEqual(
+  normalizeActiveDedupText(activeTextWithRawEmoji),
+  normalizeActiveDedupText(
+    "⁠🏌｜tareeq\n:Long: HYPE | 入场价: 64.5 | 止损价: 63.01"
+  )
+);
+
+assert.equal(
+  normalizeActiveDedupText(
+    ":Long: HYPE | 入场价: 64.412 @🏌tareeq @🚀│wg-trades"
+  ),
+  normalizeActiveDedupText(
+    "<:Long:1446387197128212530> HYPE | 入场价: 64.412 <#1400068692410110053> <#1400068611044802621>"
+  )
+);

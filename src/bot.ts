@@ -22,6 +22,7 @@ import { FileLogger } from "./logger.js";
 import {
   buildActiveSlotSourceIdsForScope,
   buildActiveSlotSourceId,
+  normalizeActiveDedupText,
   partitionActivePreparedMessagesForEdit,
   runActiveSourceQueued
 } from "./activeForwarding.js";
@@ -147,8 +148,7 @@ const ZERO_WIDTH_REGEX = /[\u200B-\u200F\u2028\u2029\uFEFF\u2060]/g;
 
 // 过滤掉动态内容（Discord 时间戳等），用于去重比较
 function filterDynamicContent(text: string): string {
-  // 过滤 Discord 时间戳：<t:数字:R> 或 <t:数字:F> 等格式
-  return text.replace(/<t:\d+:[RFDT]>/g, "<t:DYNAMIC:R>");
+  return normalizeActiveDedupText(text);
 }
 
 const matchesId = (expected: ChannelId, actual: string) =>

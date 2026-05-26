@@ -28,6 +28,34 @@ export function buildActiveSlotSourceId(category: string, scopeKey: string) {
   return `active-slot:${category}:${scopeKey}`;
 }
 
+const ACTIVE_DEDUP_ZERO_WIDTH_REGEX = /[\u200B-\u200F\u2028\u2029\uFEFF\u2060]/g;
+
+function normalizeStrategyEmojiName(name: string) {
+  const baseName = String(name || "")
+    .replace(/~\d+$/u, "")
+    .toLowerCase();
+  return ["long", "short", "spot"].includes(baseName) ? baseName : name;
+}
+
+export function normalizeActiveDedupText(text: string): string {
+  return String(text || "")
+    .replace(ACTIVE_DEDUP_ZERO_WIDTH_REGEX, "")
+    .replace(/<t:\d+:[RFDT]>/g, "<t:DYNAMIC:R>")
+    .replace(
+      /https:\/\/(?:ptb\.)?discord(?:app)?\.com\/channels\/\d+\/\d+(?:\/\d+)?/g,
+      "<discord-channel-link>"
+    )
+    .replace(/<#\d+>/g, "@active-alias")
+    .replace(/<a?:([A-Za-z0-9_~+.-]+):\d+>/g, (_match, name: string) => {
+      return `:${normalizeStrategyEmojiName(name)}:`;
+    })
+    .replace(/:(Long|Short|Spot)(?:~\d+)?:/gi, (_match, name: string) => {
+      return `:${String(name).toLowerCase()}:`;
+    })
+    .replace(/(^|\s)@\S+/gu, "$1@active-alias")
+    .trim();
+}
+
 export function buildActiveSlotSourceIdsForScope(
   category: string | undefined,
   scope?: ActiveTargetScope
