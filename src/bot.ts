@@ -171,6 +171,12 @@ export class Bot {
   private activeLastSent = new Map<string, string>();
   private env = getEnv();
   private mapFile = path.resolve(process.cwd(), ".data", "message_map.json");
+  private activeLastSentFile = path.resolve(
+    process.cwd(),
+    ".data",
+    "active_last_sent.json"
+  );
+  private activeLastSentLoaded = false;
   private logger = new FileLogger();
   private personaProfileCache = new Map<
     string,
@@ -1347,6 +1353,47 @@ export class Bot {
       this.sourceToTarget = new Map(normalizedEntries);
       await this.backfillActiveSlotMappings();
     } catch {}
+    await this.ensureActiveLastSentLoaded();
+  }
+
+  private async ensureActiveLastSentLoaded() {
+    if (this.activeLastSentLoaded) {
+      return;
+    }
+    this.activeLastSentLoaded = true;
+    try {
+      await this.ensureDataDir();
+      const raw = await fs.readFile(this.activeLastSentFile, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return;
+      }
+      this.activeLastSent = new Map(
+        Object.entries(parsed)
+          .filter((entry): entry is [string, string] => {
+            return (
+              typeof entry[0] === "string" && typeof entry[1] === "string"
+            );
+          })
+          .map(([sourceId, text]) => [sourceId, filterDynamicContent(text)])
+      );
+    } catch {}
+  }
+
+  private async saveActiveLastSent() {
+    try {
+      await this.ensureDataDir();
+      const obj = Object.fromEntries(this.activeLastSent.entries());
+      const tmp = this.activeLastSentFile + ".tmp";
+      await fs.writeFile(tmp, JSON.stringify(obj), "utf-8");
+      await fs.rename(tmp, this.activeLastSentFile);
+    } catch {}
+  }
+
+  private async rememberActiveLastSent(sourceMessageId: string, text: string) {
+    await this.ensureActiveLastSentLoaded();
+    this.activeLastSent.set(sourceMessageId, filterDynamicContent(text));
+    await this.saveActiveLastSent();
   }
 
   private async backfillActiveSlotMappings() {
@@ -2113,6 +2160,7 @@ export class Bot {
     message: Message,
     originalText: string
   ): Promise<ActiveOverrideResult | null> {
+    await this.ensureActiveLastSentLoaded();
     const activeMatch = this.resolveActiveCategory(message.channelId);
     if (!activeMatch) {
       return null;
@@ -4085,7 +4133,7 @@ export class Bot {
 
       // activeBlocks 消息去重：保存实际要发送的最终文本
       if (activeOverride) {
-        this.activeLastSent.set(message.id, filterDynamicContent(finalText));
+        await this.rememberActiveLastSent(message.id, finalText);
       }
 
       const buildActionRows = (buttons: any[]) => {
