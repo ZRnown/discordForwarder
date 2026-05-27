@@ -63,12 +63,13 @@ assert.deepEqual(
     target.messageId
   ]),
   [
-    ["main", "1400068611044802621", "1506579700074549248"]
+    ["main", "1400068611044802621", "1506579700074549248"],
+    ["thread-a", "1506590874589593620", "1507000000000000001"]
   ]
 );
 assert.deepEqual(
   plan.sendable.map(({ sender }) => sender.name),
-  ["thread-a", "thread-b", "upload"]
+  ["thread-b", "upload"]
 );
 
 const tooLong = partitionActivePreparedMessagesForEdit(

@@ -146,11 +146,6 @@ export function canEditActiveForwardItem(item: ActiveForwardItem): boolean {
   );
 }
 
-function isActiveThreadScope(sender: unknown): boolean {
-  const scope = sender as ActiveTargetScope | undefined;
-  return Boolean(scope?.threadId || scope?.threadName);
-}
-
 export function partitionActivePreparedMessagesForEdit<
   TSender,
   TItem extends ActiveForwardItem
@@ -170,10 +165,9 @@ export function partitionActivePreparedMessagesForEdit<
 
   for (const prepared of preparedMessages) {
     const existingTarget =
-      canEditActiveForwardItem(prepared.item) &&
-      !isActiveThreadScope(prepared.sender)
-      ? findTargetMessage(sourceMessageId, prepared.sender)
-      : undefined;
+      canEditActiveForwardItem(prepared.item)
+        ? findTargetMessage(sourceMessageId, prepared.sender)
+        : undefined;
     if (existingTarget) {
       editable.push({ prepared, target: existingTarget });
     } else {
